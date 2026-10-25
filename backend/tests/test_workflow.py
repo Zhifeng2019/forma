@@ -1,0 +1,106 @@
+import os
+import tempfile
+
+os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='forma-test-')
+os.environ['SECRET_KEY'] = 'test-secret-key-with-at-least-32-bytes'
+
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+
+def register(email, name='Test User'):
+    response = client.post('/api/auth/register', json={'email': email, 'name': name, 'password': 'password123'})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def auth(token):
+    return {'Authorization': f'Bearer {token}'}
+
+
+def test_complete_product_lifecycle():
+    account = register('maker@example.com')
+    token = account['token']
+    response = client.post('/api/projects', headers=auth(token), json={
+        'name': 'Client Compass',
+        'brief': 'A client portal for a small consultancy to track project progress and next actions.',
+        'auto_mode': False,
+    })
+    assert response.status_code == 200, response.text
+    project = response.json()
+    assert project['stage'] == 'design'
+    assert project['artifacts'][0]['path'] == 'product.md'
+    project_id = project['id']
+
+    response = client.post(f'/api/projects/{project_id}/messages', headers=auth(token), json={'content': 'Keep the first release focused on one primary workflow.'})
+    assert response.status_code == 200
+    project = response.json()
+    product = next(a['content'] for a in project['artifacts'] if a['path'] == 'product.md')
+    assert 'Revision direction' in product
+
+    for expected in ['plan', 'build', 'build', 'build', 'review']:
+        response = client.post(f'/api/projects/{project_id}/advance', headers=auth(token), json={'feedback': ''})
+        assert response.status_code == 200, response.text
+        project = response.json()
+        assert project['stage'] == expected
+
+    assert project['current_version'] == 3
+    assert len(project['versions']) == 3
+    assert '<html' in next(a['content'] for a in project['artifacts'] if a['path'] == 'index.html')
+
+    response = client.post(f'/api/projects/{project_id}/messages', headers=auth(token), json={
+        'content': 'Make the primary action more prominent.',
+        'selection': {'selector': '#newItem', 'text': 'Create new item'},
+    })
+    assert response.status_code == 200
+    project = response.json()
+    assert project['current_version'] == 4
+    assert 'Selected element: #newItem' in project['messages'][-2]['content']
+
+    response = client.get(f'/api/projects/{project_id}/preview?access_token={token}')
+    assert response.status_code == 200
+    assert 'forma-picker' in response.text
+
+    assert client.get(f'/apps/{project_id}/').status_code == 404
+    response = client.post(f'/api/projects/{project_id}/publish', headers=auth(token), json={})
+    assert response.status_code == 200
+    assert response.json()['published_version'] == 4
+    response = client.get(f'/apps/{project_id}/')
+    assert response.status_code == 200
+    assert 'Client Compass' in response.text
+
+    other = register('other@example.com')
+    assert client.get(f'/api/projects/{project_id}', headers=auth(other['token'])).status_code == 404
+    assert client.get(f'/api/projects/{project_id}/preview?access_token={other["token"]}').status_code == 404
+
+
+def test_admin_provider_and_user_controls():
+    login = client.post('/api/auth/login', json={'email': 'admin@forma.local', 'password': 'admin123'})
+    assert login.status_code == 200
+    admin = login.json()
+    response = client.post('/api/providers', headers=auth(admin['token']), json={
+        'name': 'Test provider', 'base_url': 'https://api.example.com/v1',
+        'model': 'test-model', 'api_key': 'secret-key', 'enabled': True,
+    })
+    assert response.status_code == 200
+    provider_id = response.json()['id']
+    providers = client.get('/api/providers', headers=auth(admin['token'])).json()
+    provider = next(p for p in providers if p['id'] == provider_id)
+    assert provider['has_key'] is True
+    assert 'api_key_encrypted' not in provider
+    users = client.get('/api/admin/users', headers=auth(admin['token'])).json()
+    assert any(u['email'] == 'maker@example.com' for u in users)
+
+
+def test_autopilot_reaches_review_without_manual_gates():
+    account = register('auto@example.com')
+    response = client.post('/api/projects', headers=auth(account['token']), json={
+        'name': 'Autopilot App', 'brief': 'A simple focused application for tracking weekly creative work.',
+        'auto_mode': True,
+    })
+    assert response.status_code == 200
+    project = response.json()
+    assert project['stage'] == 'review'
+    assert project['current_version'] == 3
