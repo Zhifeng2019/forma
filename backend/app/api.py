@@ -1,14 +1,53 @@
+import asyncio
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response
 import httpx
 from .database import control_db, workspace_db, rows
 from .deps import current_user, admin_user, owned_project
 from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput
 from .security import hash_password, verify_password, create_token, encrypt_secret, decrypt_secret
 from .engine import add_message, add_event, save_artifact, generate_stage, safe_selector
+from .backend_engine import BACKEND_PATH, REQUIREMENTS_PATH
+from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manager
 
 router = APIRouter(prefix='/api')
+_generation_jobs: dict[asyncio.Task, tuple[int, str]] = {}
+
+
+def schedule_generation(user_id: int, project_id: str, coroutine) -> asyncio.Task:
+    task = asyncio.create_task(coroutine)
+    _generation_jobs[task] = (user_id, project_id)
+
+    def finish(done: asyncio.Task) -> None:
+        job = _generation_jobs.pop(done, None)
+        if not job or done.cancelled():
+            return
+        exception = done.exception()
+        if exception:
+            with workspace_db(job[0]) as db:
+                project = db.execute('SELECT status FROM projects WHERE id=?', (job[1],)).fetchone()
+                if project:
+                    db.execute("UPDATE projects SET status='error',updated_at=CURRENT_TIMESTAMP WHERE id=?", (job[1],))
+                    add_event(db, job[1], f'Background generation failed: {exception}', 'error')
+                    add_message(db, job[1], 'agent', f'I hit a problem: {exception}', 'error')
+
+    task.add_done_callback(finish)
+    return task
+
+
+async def cancel_generation_jobs() -> None:
+    jobs = list(_generation_jobs.items())
+    for task, _job in jobs:
+        task.cancel()
+    if jobs:
+        await asyncio.gather(*(task for task, _job in jobs), return_exceptions=True)
+    for user_id, project_id in {job for _task, job in jobs}:
+        with workspace_db(user_id) as db:
+            project = db.execute('SELECT status FROM projects WHERE id=?', (project_id,)).fetchone()
+            if project and project['status'] == 'working':
+                db.execute("UPDATE projects SET status='error',updated_at=CURRENT_TIMESTAMP WHERE id=?", (project_id,))
+                add_event(db, project_id, 'Generation stopped when the studio shut down. Retry this stage.', 'error')
 
 
 def auth_payload(user):
@@ -159,6 +198,7 @@ def project_payload(user_id, project_id):
             raise HTTPException(404, 'Project not found')
         result = dict(project)
         result['auto_mode'] = bool(result['auto_mode'])
+        result['backend_enabled'] = result['backend_mode'] == 'fastapi'
         result['messages'] = rows(db.execute('SELECT * FROM messages WHERE project_id=? ORDER BY id', (project_id,)))
         result['events'] = rows(db.execute('SELECT * FROM events WHERE project_id=? ORDER BY id DESC LIMIT 30', (project_id,)))
         result['versions'] = rows(db.execute('SELECT id,version,label,note,created_at FROM versions WHERE project_id=? ORDER BY version DESC', (project_id,)))
@@ -178,21 +218,31 @@ def list_projects(user=Depends(current_user)):
 @router.post('/projects')
 async def create_project(body: ProjectInput, user=Depends(current_user)):
     project_id = uuid.uuid4().hex
+    reason = 'Selected when this project was created.' if body.backend_mode != 'auto' else ''
+    initial_status = 'working' if body.defer else 'ready'
     with workspace_db(user['id']) as db:
-        db.execute('INSERT INTO projects(id,name,brief,auto_mode) VALUES(?,?,?,?)', (project_id, body.name.strip(), body.brief.strip(), int(body.auto_mode)))
+        db.execute('INSERT INTO projects(id,name,brief,auto_mode,backend_mode,backend_reason,status) VALUES(?,?,?,?,?,?,?)',
+                   (project_id, body.name.strip(), body.brief.strip(), int(body.auto_mode), body.backend_mode, reason, initial_status))
         add_message(db, project_id, 'user', body.brief.strip(), 'brief')
-        add_message(db, project_id, 'agent', 'I’m shaping your idea into a focused product description. I’ll keep the scope clear and the first release useful.', 'stage')
+        add_message(db, project_id, 'agent', 'I’m shaping your idea into a focused product description. I’ll keep the scope clear and choose only the architecture it needs.', 'stage')
         add_event(db, project_id, 'Project created')
     with control_db() as db:
         from .engine import provider_for_user
         provider = provider_for_user(db, user['id'])
-    await generate_stage(user['id'], project_id, provider)
-    if body.auto_mode:
-        for _ in range(5):
-            current = project_payload(user['id'], project_id)
-            if current['stage'] not in {'design', 'plan', 'build'} or current['status'] == 'error':
-                break
-            await generate_stage(user['id'], project_id, provider)
+
+    async def run_creation() -> None:
+        await generate_stage(user['id'], project_id, provider)
+        if body.auto_mode:
+            for _ in range(5):
+                current = project_payload(user['id'], project_id)
+                if current['stage'] not in {'design', 'plan', 'build'} or current['status'] == 'error':
+                    break
+                await generate_stage(user['id'], project_id, provider)
+
+    if body.defer:
+        schedule_generation(user['id'], project_id, run_creation())
+    else:
+        await run_creation()
     return project_payload(user['id'], project_id)
 
 
@@ -202,8 +252,9 @@ def get_project(project_id: str, user=Depends(current_user)):
 
 
 @router.delete('/projects/{project_id}')
-def delete_project(project_id: str, user=Depends(current_user)):
+async def delete_project(project_id: str, user=Depends(current_user)):
     owned_project(user['id'], project_id)
+    await runtime_manager.remove_project(project_id)
     with workspace_db(user['id']) as db:
         for table in ['artifacts', 'versions', 'messages', 'events', 'projects']:
             db.execute(f'DELETE FROM {table} WHERE {"id" if table == "projects" else "project_id"}=?', (project_id,))
@@ -234,7 +285,7 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
         from .engine import provider_for_user
         provider = provider_for_user(db, user['id'])
     if project['stage'] in {'build', 'review'}:
-        await generate_stage(user['id'], project_id, provider, body.content + selection)
+        await generate_stage(user['id'], project_id, provider, body.content + selection, revise=True)
     else:
         artifact_stage = {'design': 'discovery', 'plan': 'design', 'build': 'plan'}.get(project['stage'])
         artifact_path = {'discovery': 'product.md', 'design': 'design.md', 'plan': 'plan.md'}.get(artifact_stage)
@@ -258,27 +309,113 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
     return project_payload(user['id'], project_id)
 
 
+def runtime_artifacts(user_id: int, project_id: str, version: int) -> tuple[str, str]:
+    with workspace_db(user_id) as db:
+        project = db.execute('SELECT backend_mode FROM projects WHERE id=?', (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(404, 'Project not found')
+        if project['backend_mode'] != 'fastapi':
+            raise HTTPException(409, 'This application is frontend only')
+        artifacts = db.execute(
+            'SELECT path,content FROM artifacts WHERE project_id=? AND version=? AND path IN (?,?)',
+            (project_id, version, BACKEND_PATH, REQUIREMENTS_PATH),
+        ).fetchall()
+    contents = {artifact['path']: artifact['content'] for artifact in artifacts}
+    if BACKEND_PATH not in contents or REQUIREMENTS_PATH not in contents:
+        raise HTTPException(404, 'This version does not contain a FastAPI backend')
+    return contents[BACKEND_PATH], contents[REQUIREMENTS_PATH]
+
+
+def runtime_response(upstream: httpx.Response) -> Response:
+    headers = {'Cache-Control': 'no-store'}
+    if upstream.headers.get('content-type'):
+        headers['Content-Type'] = upstream.headers['content-type']
+    return Response(content=upstream.content, status_code=upstream.status_code, headers=headers)
+
+
+async def forward_runtime(
+    request: Request, user_id: int, project_id: str, version: int, channel: str, path: str,
+) -> Response:
+    source, requirements = runtime_artifacts(user_id, project_id, version)
+    try:
+        if int(request.headers.get('content-length', '0')) > 2_000_000:
+            raise HTTPException(413, 'Application request body is limited to 2 MB')
+    except ValueError:
+        pass
+    body = await request.body()
+    if len(body) > 2_000_000:
+        raise HTTPException(413, 'Application request body is limited to 2 MB')
+    try:
+        upstream = await runtime_manager.request(
+            project_id, version, channel, source, requirements, request.method, path,
+            request.url.query, body, request.headers.get('content-type', ''),
+        )
+    except RuntimeLaunchError as exc:
+        detail = ('The application backend is temporarily unavailable. Please try again shortly.'
+                  if channel == 'public' else str(exc))
+        raise HTTPException(503, detail) from exc
+    return runtime_response(upstream)
+
+
+@router.get('/projects/{project_id}/runtime')
+async def runtime_status(project_id: str, check: bool = False, user=Depends(current_user)):
+    project = owned_project(user['id'], project_id)
+    if project['backend_mode'] != 'fastapi':
+        return {'enabled': False, 'status': 'frontend-only', 'healthy': False, 'version': 0, 'logs': ''}
+    if not project['current_version']:
+        return {'enabled': True, 'status': 'stopped', 'healthy': False, 'version': 0, 'logs': '', 'started_at': None}
+    return await runtime_manager.status(project_id, project['current_version'], check_health=check)
+
+
+@router.post('/projects/{project_id}/runtime/restart')
+async def restart_runtime(project_id: str, user=Depends(current_user)):
+    project = owned_project(user['id'], project_id)
+    if project['backend_mode'] != 'fastapi' or not project['current_version']:
+        raise HTTPException(409, 'Build a FastAPI application before restarting its runtime')
+    source, requirements = runtime_artifacts(user['id'], project_id, project['current_version'])
+    try:
+        result = await runtime_manager.restart(project_id, project['current_version'], source, requirements)
+    except RuntimeLaunchError as exc:
+        with workspace_db(user['id']) as db:
+            add_event(db, project_id, f'Backend restart failed: {exc}', 'error')
+        raise HTTPException(503, str(exc)) from exc
+    with workspace_db(user['id']) as db:
+        add_event(db, project_id, f'FastAPI version {project["current_version"]} restarted and healthy', 'success')
+    return result
+
+
+@router.api_route('/projects/{project_id}/runtime/{version}/{path:path}',
+                  methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])
+async def preview_runtime(project_id: str, version: int, path: str, request: Request, user=Depends(current_user)):
+    owned_project(user['id'], project_id)
+    return await forward_runtime(request, user['id'], project_id, version, 'preview', path)
+
+
 @router.post('/projects/{project_id}/publish')
-def publish_project(project_id: str, body: PublishInput, user=Depends(current_user)):
+async def publish_project(project_id: str, body: PublishInput, user=Depends(current_user)):
     project = owned_project(user['id'], project_id)
     version = body.version or project['current_version']
     if not version:
         raise HTTPException(409, 'Build at least one version before publishing')
+    if project['backend_mode'] == 'fastapi':
+        runtime_artifacts(user['id'], project_id, version)
     with workspace_db(user['id']) as db:
         if not db.execute('SELECT 1 FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, 'index.html', version)).fetchone():
             raise HTTPException(404, 'Version not found')
         db.execute('UPDATE projects SET published_version=?,stage=?,stage_index=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', (version, 'deploy', 5, project_id))
         add_event(db, project_id, f'Version {version} published', 'success')
         add_message(db, project_id, 'agent', f'Version {version} is live. Your public link is ready to share.', 'deployment')
+    await runtime_manager.stop_project(project_id, channel='public', keep_version=version)
     return project_payload(user['id'], project_id)
 
 
 @router.post('/projects/{project_id}/unpublish')
-def unpublish_project(project_id: str, user=Depends(current_user)):
+async def unpublish_project(project_id: str, user=Depends(current_user)):
     owned_project(user['id'], project_id)
     with workspace_db(user['id']) as db:
         db.execute('UPDATE projects SET published_version=NULL WHERE id=?', (project_id,))
         add_event(db, project_id, 'Publication revoked')
+    await runtime_manager.stop_project(project_id, channel='public')
     return {'ok': True}
 
 
@@ -313,5 +450,8 @@ def preview_project(project_id: str, access_token: str, version: int | None = No
         artifact = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, 'index.html', version)).fetchone()
     if not artifact:
         raise HTTPException(404, 'No application preview is available yet')
-    html = artifact['content'].replace('</body>', PICKER_SCRIPT + '</body>')
+    html = artifact['content']
+    if project['backend_mode'] == 'fastapi':
+        html = inject_runtime_bootstrap(html, project_id, version, published=False)
+    html = html.replace('</body>', PICKER_SCRIPT + '</body>')
     return HTMLResponse(html, headers={'Cache-Control': 'no-store', 'Content-Security-Policy': "frame-ancestors 'self' http://localhost:5173"})

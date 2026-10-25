@@ -2,11 +2,12 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Circle, Code2, Copy, ExternalLink, FileText, Globe2, History, Laptop, LoaderCircle, Maximize2, MessageSquareText, Monitor, MousePointer2, Paperclip, RefreshCw, Rocket, Send, Smartphone, Sparkles, Tablet, X } from 'lucide-react'
+import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Circle, Code2, Copy, ExternalLink, FileText, Globe2, History, Laptop, LoaderCircle, Maximize2, MessageSquareText, Monitor, MousePointer2, Paperclip, RefreshCw, Rocket, Send, Server, Smartphone, Sparkles, Tablet, X } from 'lucide-react'
 import { api, getToken } from '../api'
-import type { Project, Selection, User } from '../types'
+import type { Message as ChatMessage, Project, Selection, User } from '../types'
 import { LogoMark } from '../App'
 import { Modal } from '../components/Modal'
+import { BackendPanel } from '../components/BackendPanel'
 
 const stages = [
   { id: 'discovery', short: 'Describe', title: 'Product description', action: 'Approve description' },
@@ -16,7 +17,7 @@ const stages = [
   { id: 'review', short: 'Review', title: 'Review & improve', action: 'Approve release' },
   { id: 'deploy', short: 'Publish', title: 'Ready to publish', action: 'Publish app' },
 ]
-type Tab = 'preview' | 'documents' | 'activity'
+type Tab = 'preview' | 'documents' | 'server' | 'activity'
 
 export function Builder({ user }: { user: User; onUser: (user: User | null) => void }) {
   const { id = '' } = useParams()
@@ -43,6 +44,37 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
     if (data.artifacts.length && !data.artifacts.some(a => a.path === docPath)) setDocPath(data.artifacts[0].path)
   }).catch(reason => setError(reason.message)), [id, docPath])
   useEffect(() => { void load() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!project) return
+    const autopilotInProgress = project.auto_mode && project.status !== 'error' && ['discovery', 'design', 'plan', 'build'].includes(project.stage)
+    if (project.status !== 'working' && !autopilotInProgress) return
+    let active = true, refreshing = false, failures = 0, version = project.current_version
+    const refresh = async () => {
+      if (refreshing) return
+      refreshing = true
+      try {
+        const data = await api<Project>(`/projects/${id}`)
+        if (!active) return
+        failures = 0
+        if (data.current_version !== version) {
+          version = data.current_version
+          setPreviewKey(key => key + 1)
+          setTab('preview')
+        }
+        setProject(data)
+      } catch (reason) {
+        if (!active) return
+        failures += 1
+        if (failures >= 4) {
+          setError(reason instanceof Error ? reason.message : String(reason))
+          setProject(current => current ? { ...current, status: 'error' } : current)
+        }
+      } finally { refreshing = false }
+    }
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, 1500)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [id, project?.status, project?.stage, project?.auto_mode])
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [project?.messages.length])
   useEffect(() => {
     const handler = (event: MessageEvent) => {
@@ -61,15 +93,35 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
 
   const advance = async () => {
     if (project.stage === 'deploy') { setPublish(true); return }
+    const previousVersion = project.current_version
     setBusy(true); setError('')
-    try { const next = await api<Project>(`/projects/${id}/advance`, { method: 'POST', body: JSON.stringify({ feedback: '' }) }); setProject(next); setPreviewKey(k => k + 1); if (next.stage === 'build' || next.stage === 'review') setTab('preview') }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) }
+    try {
+      const next = await api<Project>(`/projects/${id}/advance`, { method: 'POST', body: JSON.stringify({ feedback: '' }) })
+      setProject(next)
+      if (next.current_version !== previousVersion) setPreviewKey(k => k + 1)
+      if (next.stage === 'build' || next.stage === 'review') setTab('preview')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) }
   }
   const send = async (event: FormEvent) => {
     event.preventDefault(); if (!message.trim() || isWorking) return
-    setBusy(true); setError('')
-    try { const next = await api<Project>(`/projects/${id}/messages`, { method: 'POST', body: JSON.stringify({ content: message, selection }) }); setProject(next); setMessage(''); setSelection(null); setPreviewKey(k => k + 1) }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) }
+    const content = message, selected = selection, previousVersion = project.current_version
+    const optimistic: ChatMessage = {
+      id: -Date.now(), role: 'user', content, kind: 'chat',
+      metadata: JSON.stringify({ selection: selected || {} }),
+      created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    }
+    setProject(current => current ? { ...current, messages: [...current.messages, optimistic] } : current)
+    setMessage(''); setSelection(null); setBusy(true); setError('')
+    try {
+      const next = await api<Project>(`/projects/${id}/messages`, { method: 'POST', body: JSON.stringify({ content, selection: selected }) })
+      setProject(next)
+      if (next.current_version !== previousVersion) setPreviewKey(k => k + 1)
+    } catch (reason) {
+      setProject(current => current ? { ...current, messages: current.messages.filter(item => item.id !== optimistic.id) } : current)
+      setMessage(current => current.trim() ? current : content)
+      setSelection(current => current || selected)
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally { setBusy(false) }
   }
   const doPublish = async () => {
     setBusy(true)
@@ -80,7 +132,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   const chooseVersion = (version: number | null) => { setViewVersion(version); setPreviewKey(k => k + 1); setShowVersions(false) }
 
   return <div className="builder-shell">
-    <header className="builder-header"><div className="builder-brand"><Link to="/" className="brand"><LogoMark /><span>forma</span></Link><i /><Link to="/" className="back-link"><ArrowLeft size={15} />Projects</Link><span className="project-name">{project.name}<ChevronDown size={13} /></span><span className="save-state"><Check size={12} />Saved</span></div><div className="builder-header-actions"><button className="button ghost compact" onClick={() => setShowVersions(!showVersions)}><History size={15} />{viewVersion ? `Viewing v${viewVersion}` : 'History'}<ChevronDown size={12} /></button><button className="button primary compact" onClick={() => setPublish(true)}><Rocket size={15} />{project.published_version ? 'Manage release' : 'Publish'}</button><span className="avatar small">{user.name[0].toUpperCase()}</span></div>
+    <header className="builder-header"><div className="builder-brand"><Link to="/" className="brand"><LogoMark /><span>forma</span></Link><i /><Link to="/" className="back-link"><ArrowLeft size={15} />Projects</Link><span className="project-name">{project.name}<ChevronDown size={13} /></span><span className="save-state"><Check size={12} />Saved</span><span className="architecture-label" title={project.backend_reason}>{project.backend_mode === 'fastapi' ? <Server size={12} /> : <Code2 size={12} />}{project.backend_mode === 'fastapi' ? 'FastAPI' : project.backend_mode === 'static' ? 'Frontend only' : 'Choosing architecture'}</span></div><div className="builder-header-actions"><button className="button ghost compact" onClick={() => setShowVersions(!showVersions)}><History size={15} />{viewVersion ? `Viewing v${viewVersion}` : 'History'}<ChevronDown size={12} /></button><button className="button primary compact" onClick={() => setPublish(true)}><Rocket size={15} />{project.published_version ? 'Manage release' : 'Publish'}</button><span className="avatar small">{user.name[0].toUpperCase()}</span></div>
       {showVersions && <div className="versions-menu"><header><strong>Version history</strong><button onClick={() => setShowVersions(false)}><X size={15} /></button></header><button className={!viewVersion ? 'selected' : ''} onClick={() => chooseVersion(null)}><span><strong>Current working version</strong><small>v{project.current_version || 'draft'} · Latest changes</small></span>{!viewVersion && <Check size={15} />}</button>{project.versions.map(v => <button key={v.id} className={viewVersion === v.version ? 'selected' : ''} onClick={() => chooseVersion(v.version)}><span><strong>Version {v.version} · {v.label}</strong><small>{v.note || new Date(v.created_at).toLocaleString()}</small></span>{project.published_version === v.version && <span className="tiny-live">LIVE</span>}</button>)}</div>}
     </header>
     <div className="stage-track">{stages.map((item, index) => <button key={item.id} className={`${index === project.stage_index ? 'active' : ''} ${index < project.stage_index ? 'complete' : ''}`} onClick={() => { const artifact = project.artifacts.find(a => a.stage === item.id); if (artifact) { setDocPath(artifact.path); setTab('documents') } }} disabled={index > project.stage_index}><span>{index < project.stage_index ? <Check size={12} /> : index + 1}</span>{item.short}{index < stages.length - 1 && <i />}</button>)}</div>
@@ -89,11 +141,12 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
         <div className="chat-scroll"><div className="context-card"><span>BUILDING</span><strong>{project.name}</strong><p>{project.brief}</p></div>{project.messages.map(msg => <div key={msg.id} className={`chat-message ${msg.role}`} >{msg.role === 'agent' && <span className="agent-avatar"><Sparkles size={13} /></span>}<div><span className="message-author">{msg.role === 'agent' ? 'Forma' : 'You'}<time>{timeLabel(msg.created_at)}</time></span><p>{msg.content}</p>{msg.kind === 'stage' && msg.role === 'agent' && <span className="message-receipt"><CheckCircle2 size={12} />Workspace updated</span>}</div></div>)}{isWorking && <div className="chat-message agent"><span className="agent-avatar"><Sparkles size={13} /></span><div><span className="message-author">Forma</span><div className="thinking"><i /><i /><i /><span>{workingLabel(project.stage)}</span></div></div></div>}<div ref={chatEnd} /></div>
         <div className="composer-wrap">{selection && <div className="selection-pill"><MousePointer2 size={13} /><span>{selection.selector}</span><button onClick={() => setSelection(null)}><X size={12} /></button></div>}<form className="composer" onSubmit={send}><textarea value={message} onChange={e => setMessage(e.target.value)} placeholder={selection ? 'What should change here?' : 'Ask for a change or share feedback…'} rows={3} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(e) } }} /><div><button type="button" className={`icon-button ${picking ? 'active' : ''}`} title="Select an element in the preview" onClick={() => { setTab('preview'); setPicking(!picking) }}><Paperclip size={16} /></button><span>↵ to send</span><button className="send-button" disabled={!message.trim() || isWorking}><Send size={15} /></button></div></form><p className="composer-note">Forma can make mistakes. Review before publishing.</p></div>
       </aside>
-      <main className="work-panel"><header className="work-tabs"><div><button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Monitor size={15} />Preview</button><button className={tab === 'documents' ? 'active' : ''} onClick={() => setTab('documents')}><FileText size={15} />Documents<span>{project.artifacts.filter(a => a.path.endsWith('.md')).length}</span></button><button className={tab === 'activity' ? 'active' : ''} onClick={() => setTab('activity')}><Activity size={15} />Activity</button></div>{tab === 'preview' && html && <div className="preview-tools"><span className="device-switch"><button className={device === 'desktop' ? 'active' : ''} onClick={() => setDevice('desktop')} title="Desktop"><Laptop size={15} /></button><button className={device === 'tablet' ? 'active' : ''} onClick={() => setDevice('tablet')} title="Tablet"><Tablet size={15} /></button><button className={device === 'mobile' ? 'active' : ''} onClick={() => setDevice('mobile')} title="Mobile"><Smartphone size={15} /></button></span><button className={`icon-button ${picking ? 'active picker-on' : ''}`} onClick={() => setPicking(!picking)} title="Select element to edit"><MousePointer2 size={16} /></button><button className="icon-button" onClick={() => setPreviewKey(k => k + 1)} title="Refresh preview"><RefreshCw size={15} /></button></div>}</header>
+      <main className="work-panel"><header className="work-tabs"><div><button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Monitor size={15} />Preview</button><button className={tab === 'documents' ? 'active' : ''} onClick={() => setTab('documents')}><FileText size={15} />Documents<span>{project.artifacts.filter(a => a.path.endsWith('.md')).length}</span></button>{project.backend_mode === 'fastapi' && <button className={tab === 'server' ? 'active' : ''} onClick={() => setTab('server')}><Server size={15} />Server</button>}<button className={tab === 'activity' ? 'active' : ''} onClick={() => setTab('activity')}><Activity size={15} />Activity</button></div>{tab === 'preview' && html && <div className="preview-tools"><span className="device-switch"><button className={device === 'desktop' ? 'active' : ''} onClick={() => setDevice('desktop')} title="Desktop"><Laptop size={15} /></button><button className={device === 'tablet' ? 'active' : ''} onClick={() => setDevice('tablet')} title="Tablet"><Tablet size={15} /></button><button className={device === 'mobile' ? 'active' : ''} onClick={() => setDevice('mobile')} title="Mobile"><Smartphone size={15} /></button></span><button className={`icon-button ${picking ? 'active picker-on' : ''}`} onClick={() => setPicking(!picking)} title="Select element to edit"><MousePointer2 size={16} /></button><button className="icon-button" onClick={() => setPreviewKey(k => k + 1)} title="Refresh preview"><RefreshCw size={15} /></button></div>}</header>
         {error && <div className="builder-error">{error}<button onClick={() => setError('')}><X size={14} /></button></div>}
         <section className="workspace-content">
           {tab === 'preview' && (html ? <div className={`preview-stage ${device}`}><div className="browser-bar"><div className="browser-dots"><i /><i /><i /></div><div className="browser-address"><span>⌕</span>preview.forma.local/{project.id.slice(0, 8)}</div><button onClick={() => window.open(`/api/projects/${id}/preview?access_token=${encodeURIComponent(getToken() || '')}&version=${viewVersion || project.current_version}`, '_blank')}><ExternalLink size={14} /></button></div><iframe key={`${previewKey}-${viewVersion}`} ref={frameRef} src={`/api/projects/${id}/preview?access_token=${encodeURIComponent(getToken() || '')}&version=${viewVersion || project.current_version}`} title={`${project.name} preview`} sandbox="allow-scripts allow-forms allow-modals allow-same-origin" />{picking && <div className="picker-banner"><MousePointer2 size={14} />Click any element to give targeted feedback<button onClick={() => setPicking(false)}>Cancel</button></div>}{viewVersion && <div className="history-banner"><History size={14} />Viewing version {viewVersion}<button onClick={() => chooseVersion(null)}>Return to current</button></div>}</div> : <PreviewEmpty stage={project.stage_index} onAction={advance} busy={isWorking} />)}
           {tab === 'documents' && <div className="documents-view"><nav>{project.artifacts.filter(a => a.path.endsWith('.md')).map(a => <button className={docPath === a.path ? 'active' : ''} key={a.path} onClick={() => setDocPath(a.path)}><FileText size={16} /><span>{a.path}<small>{a.stage}</small></span><ArrowRight size={13} /></button>)}{!project.artifacts.some(a => a.path.endsWith('.md')) && <p>Documents will appear as your product team completes each stage.</p>}</nav><article className="markdown-body">{document ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{document.content}</ReactMarkdown> : <div className="empty-state"><FileText size={28} /><h3>Document in progress</h3></div>}</article></div>}
+          {tab === 'server' && project.backend_mode === 'fastapi' && <BackendPanel project={project} onChanged={() => void load()} />}
           {tab === 'activity' && <div className="activity-view"><div className="activity-heading"><span className="eyebrow">PROJECT TIMELINE</span><h2>Every step, in the open.</h2><p>A clear record of your product team’s work and releases.</p></div><div className="timeline">{project.events.map(event => <div key={event.id}><span className={event.level}>{event.level === 'success' ? <Check size={13} /> : event.level === 'error' ? <X size={13} /> : <Circle size={9} />}</span><section><strong>{event.message}</strong><small>{new Date(event.created_at).toLocaleString()}</small></section></div>)}</div></div>}
         </section>
         <footer className="approval-bar"><div><span className="stage-icon">{isWorking ? <LoaderCircle className="spin" size={18} /> : <CheckCircle2 size={18} />}</span><div><strong>{isWorking ? workingLabel(project.stage) : stage.title}</strong><small>{isWorking ? 'You can keep reviewing the current workspace.' : approvalHint(project)}</small></div></div><button className="button primary" disabled={isWorking || project.stage === 'deploy'} onClick={advance}>{project.stage === 'deploy' ? <><Globe2 size={15} />{project.published_version ? 'Published' : 'Ready to publish'}</> : <>{project.stage === 'build' ? (project.phase_index ? `Approve phase ${project.phase_index}` : 'Build phase 1') : stage.action}<ArrowRight size={15} /></>}</button></footer>

@@ -31,6 +31,8 @@ class ProjectInput(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     brief: str = Field(min_length=12, max_length=12000)
     auto_mode: bool = False
+    backend_mode: Literal['auto', 'static', 'fastapi'] = 'auto'
+    defer: bool = False
 
 
 class MessageInput(BaseModel):

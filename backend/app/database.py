@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS projects (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, brief TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
  stage TEXT NOT NULL DEFAULT 'discovery', stage_index INTEGER NOT NULL DEFAULT 0,
  phase_index INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'ready',
- auto_mode INTEGER NOT NULL DEFAULT 0, published_version INTEGER,
+ auto_mode INTEGER NOT NULL DEFAULT 0, backend_mode TEXT NOT NULL DEFAULT 'auto',
+ backend_reason TEXT NOT NULL DEFAULT '', published_version INTEGER,
  current_version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -88,11 +89,20 @@ def init_databases():
             db.execute('INSERT INTO users(email,name,password_hash,role) VALUES(?,?,?,?)',
                        ('admin@forma.local', 'Studio Admin', hash_password('admin123'), 'admin'))
             db.execute('INSERT INTO preferences(user_id) VALUES(1)')
+        user_ids = [row['id'] for row in db.execute('SELECT id FROM users')]
+    for user_id in user_ids:
+        workspace_for(user_id)
 
 
 def workspace_for(user_id: int):
     with workspace_db(user_id) as db:
         db.executescript(WORKSPACE_SCHEMA)
+        columns = {row['name'] for row in db.execute('PRAGMA table_info(projects)')}
+        if 'backend_mode' not in columns:
+            # Existing applications remain frontend-only after an in-place upgrade.
+            db.execute("ALTER TABLE projects ADD COLUMN backend_mode TEXT NOT NULL DEFAULT 'static'")
+        if 'backend_reason' not in columns:
+            db.execute("ALTER TABLE projects ADD COLUMN backend_reason TEXT NOT NULL DEFAULT ''")
 
 
 def rows(items):

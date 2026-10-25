@@ -1,8 +1,4 @@
-import os
-import tempfile
-
-os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='forma-test-')
-os.environ['SECRET_KEY'] = 'test-secret-key-with-at-least-32-bytes'
+import time
 
 from fastapi.testclient import TestClient
 from app.main import app
@@ -103,4 +99,61 @@ def test_autopilot_reaches_review_without_manual_gates():
     assert response.status_code == 200
     project = response.json()
     assert project['stage'] == 'review'
+    assert project['current_version'] == 3
+
+
+def test_deferred_autopilot_reaches_review_in_the_background():
+    with TestClient(app) as live:
+        response = live.post('/api/auth/register', json={
+            'email': 'deferred@example.com', 'name': 'Deferred Maker', 'password': 'password123',
+        })
+        token = response.json()['token']
+        response = live.post('/api/projects', headers=auth(token), json={
+            'name': 'Live Autopilot', 'brief': 'A personal focus timer with a weekly overview and local browser state.',
+            'auto_mode': True, 'backend_mode': 'static', 'defer': True,
+        })
+        assert response.status_code == 200, response.text
+        project = response.json()
+        assert project['status'] in {'working', 'ready'}
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            project = live.get(f'/api/projects/{project["id"]}', headers=auth(token)).json()
+            if project['stage'] == 'review' or project['status'] == 'error':
+                break
+            time.sleep(0.05)
+        assert project['status'] == 'ready', project['messages'][-1]['content']
+        assert project['stage'] == 'review'
+        assert project['current_version'] == 3
+
+
+def test_feedback_refines_current_phase_without_advancing():
+    account = register('feedback@example.com')
+    response = client.post('/api/projects', headers=auth(account['token']), json={
+        'name': 'Phase Feedback', 'brief': 'A personal reading list with notes and a calm weekly overview.',
+        'backend_mode': 'static', 'auto_mode': False,
+    })
+    project = response.json()
+    project_id = project['id']
+    for _ in range(3):
+        response = client.post(f'/api/projects/{project_id}/advance', headers=auth(account['token']), json={})
+        project = response.json()
+    assert project['stage'] == 'build'
+    assert project['phase_index'] == 1
+    assert project['current_version'] == 1
+
+    response = client.post(f'/api/projects/{project_id}/messages', headers=auth(account['token']), json={
+        'content': 'Keep this phase, but make the primary action calmer.',
+    })
+    assert response.status_code == 200, response.text
+    project = response.json()
+    assert project['stage'] == 'build'
+    assert project['phase_index'] == 1
+    assert project['current_version'] == 2
+    assert project['versions'][0]['label'] == 'Refinement'
+    assert project['messages'][-1]['content'] == 'Your feedback has been applied in a new version.'
+
+    response = client.post(f'/api/projects/{project_id}/advance', headers=auth(account['token']), json={})
+    project = response.json()
+    assert project['stage'] == 'build'
+    assert project['phase_index'] == 2
     assert project['current_version'] == 3

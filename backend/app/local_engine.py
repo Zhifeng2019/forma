@@ -29,7 +29,16 @@ A first-time user can understand the product and complete its primary action in 
 '''
 
 
-def design_document(name: str) -> str:
+def design_document(name: str, backend_mode: str = 'static', backend_reason: str = '') -> str:
+    connected = backend_mode == 'fastapi'
+    frontend = ('Semantic HTML, modern CSS, and dependency-free JavaScript. Server requests use the injected '
+                'Forma.api bridge, which selects the correct private-preview or published API route.') if connected else (
+                'Semantic HTML, modern CSS, and dependency-free JavaScript for a portable static release.')
+    backend = ('A dedicated FastAPI service exposes product operations beneath `/api`, including `/api/health`. '
+               'Each application has an isolated Python environment, versioned source, an on-demand process, '
+               'and an application-local SQLite database when persistence is needed.') if connected else (
+               'No product backend is required. Forma still persists builder versions and deployment metadata; '
+               'product data can remain in local browser storage.')
     return f'''# {name} — Experience Design
 
 ## Design direction
@@ -46,27 +55,42 @@ Quiet confidence: warm neutral surfaces, crisp typography, one expressive accent
 - Responsive single-column composition below 720px.
 
 ## Frontend
-Semantic HTML, modern CSS, and dependency-free JavaScript for a portable static release.
+{frontend}
 
 ## Backend contract
-The first release persists builder versions and deployment metadata in Forma. Product data uses local browser storage; a future API can replace this adapter without changing the interface.
+{backend}
+
+## Architecture decision
+**{'FastAPI backend' if connected else 'Frontend only'}** — {backend_reason or 'Selected when the project was created.'}
 '''
 
 
-def plan_document(name: str) -> str:
+def plan_document(name: str, backend_mode: str = 'static') -> str:
+    connected = backend_mode == 'fastapi'
+    foundation = ('Build the responsive shell, visual system, FastAPI health endpoint, and shared data view. '
+                  '**Shareable outcome:** a complete page reading live data from its own API.') if connected else (
+                  'Build the responsive shell, visual system, navigation, and meaningful overview. '
+                  '**Shareable outcome:** a complete landing and dashboard experience.')
+    workflow = ('Add the main server-backed interaction, SQLite persistence, validation, error handling, and feedback. '
+                '**Shareable outcome:** a functional end-to-end user journey.') if connected else (
+                'Add the main interaction, persistent local state, validation, filtering, and feedback. '
+                '**Shareable outcome:** a functional end-to-end user journey.')
+    verification = ('Check valid HTML and Python, API health, CRUD behavior, persistence across preview and publishing, '
+                    'responsive layout, and a complete preview.') if connected else (
+                    'Check valid HTML, working interactions, responsive layout, and a complete preview.')
     return f'''# {name} — Implementation Plan
 
 ## Phase 1 · Foundation
-Build the responsive shell, visual system, navigation, and meaningful overview. **Shareable outcome:** a complete landing and dashboard experience.
+{foundation}
 
 ## Phase 2 · Core workflow
-Add the main interaction, persistent local state, validation, filtering, and feedback. **Shareable outcome:** a functional end-to-end user journey.
+{workflow}
 
 ## Phase 3 · Polish & release
 Refine responsive behavior, accessibility, motion, empty states, and final content. **Shareable outcome:** a release candidate ready for review.
 
 ## Verification
-Each phase is checked for valid HTML, working interactions, responsive layout, and a complete preview before approval.
+{verification}
 '''
 
 

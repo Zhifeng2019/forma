@@ -4,14 +4,16 @@ import path from 'node:path'
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const backendRoot = path.resolve(frontendRoot, '../backend')
+const backendUrl = process.env.FORMA_BACKEND_URL || 'http://127.0.0.1:8000'
+const backendPort = new URL(backendUrl).port || '8000'
 const python = process.env.PYTHON || '/Users/zhifengzhang/python_env/env_ai_build/bin/python'
 let backend
 
 try {
-  const health = await fetch('http://127.0.0.1:8000/api/health', { signal: AbortSignal.timeout(800) })
+  const health = await fetch(`${backendUrl}/api/health`, { signal: AbortSignal.timeout(800) })
   if (!health.ok) throw new Error('Backend unavailable')
 } catch {
-  backend = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'], {
+  backend = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', backendPort], {
     cwd: backendRoot,
     stdio: 'inherit',
     env: process.env,
