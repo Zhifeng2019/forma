@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE TABLE IF NOT EXISTS versions (
  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, version INTEGER NOT NULL,
- label TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
- UNIQUE(project_id, version)
+ label TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', backend_mode TEXT NOT NULL DEFAULT 'static',
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(project_id, version)
 );
 CREATE TABLE IF NOT EXISTS events (
  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, message TEXT NOT NULL,
@@ -103,6 +103,11 @@ def workspace_for(user_id: int):
             db.execute("ALTER TABLE projects ADD COLUMN backend_mode TEXT NOT NULL DEFAULT 'static'")
         if 'backend_reason' not in columns:
             db.execute("ALTER TABLE projects ADD COLUMN backend_reason TEXT NOT NULL DEFAULT ''")
+        version_columns = {row['name'] for row in db.execute('PRAGMA table_info(versions)')}
+        if 'backend_mode' not in version_columns:
+            db.execute("ALTER TABLE versions ADD COLUMN backend_mode TEXT NOT NULL DEFAULT 'static'")
+            db.execute('''UPDATE versions SET backend_mode=(
+                          SELECT projects.backend_mode FROM projects WHERE projects.id=versions.project_id)''')
 
 
 def rows(items):

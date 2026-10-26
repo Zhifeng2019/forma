@@ -1,4 +1,5 @@
 import subprocess
+import time
 import pytest
 
 from fastapi.testclient import TestClient
@@ -140,3 +141,98 @@ def test_fastapi_preview_crud_publish_and_cleanup():
 
         assert client.delete(f'/api/projects/{project_id}', headers=auth(token)).status_code == 200
         assert not (settings.data_path / 'projects' / project_id).exists()
+
+
+def test_architecture_migration_preserves_history_and_published_version():
+    with TestClient(app) as client:
+        token = register(client, 'migration@example.com')
+        response = client.post('/api/projects', headers=auth(token), json={
+            'name': 'Migration Workspace', 'brief': 'A personal planning workspace that may later need shared data.',
+            'backend_mode': 'static', 'auto_mode': False,
+        })
+        project = response.json()
+        project_id = project['id']
+        for _ in range(3):
+            response = client.post(f'/api/projects/{project_id}/advance', headers=auth(token), json={})
+            project = response.json()
+        assert project['current_version'] == 1 and project['backend_mode'] == 'static'
+        response = client.post(f'/api/projects/{project_id}/publish', headers=auth(token), json={})
+        assert response.status_code == 200
+        assert client.get(f'/apps/{project_id}/api/health').status_code == 404
+        assert 'privatePreview=false' not in client.get(f'/apps/{project_id}/').text
+
+        response = client.post(f'/api/projects/{project_id}/architecture', headers=auth(token), json={
+            'target_mode': 'fastapi', 'feedback': 'Add shared priorities without changing the phase.',
+        })
+        assert response.status_code == 200, response.text
+        project = response.json()
+        assert project['backend_mode'] == 'fastapi'
+        assert project['current_version'] == 2 and project['published_version'] == 1
+        assert project['stage'] == 'deploy' and project['phase_index'] == 1
+        assert project['versions'][0]['backend_mode'] == 'fastapi'
+        assert project['versions'][0]['label'] == 'FastAPI migration'
+        assert client.get(f'/apps/{project_id}/api/health').status_code == 404
+        assert 'privatePreview=false' not in client.get(f'/apps/{project_id}/').text
+        preview = client.get(f'/api/projects/{project_id}/preview?access_token={token}&version=2')
+        assert 'window.Forma=Object.freeze' in preview.text
+        response = client.get(f'/api/projects/{project_id}/runtime/2/health', headers=auth(token))
+        assert response.status_code == 200, response.text
+
+        response = client.post(f'/api/projects/{project_id}/publish', headers=auth(token), json={})
+        assert response.status_code == 200
+        assert client.get(f'/apps/{project_id}/api/health').status_code == 200
+        response = client.post(f'/api/projects/{project_id}/architecture', headers=auth(token), json={
+            'target_mode': 'static', 'feedback': 'Return to a portable browser-only release.',
+        })
+        assert response.status_code == 200, response.text
+        project = response.json()
+        assert project['backend_mode'] == 'static'
+        assert project['current_version'] == 3 and project['published_version'] == 2
+        assert project['versions'][0]['backend_mode'] == 'static'
+        assert client.get(f'/apps/{project_id}/api/health').status_code == 200
+        assert 'privatePreview=false' in client.get(f'/apps/{project_id}/').text
+        old_fastapi_preview = client.get(f'/api/projects/{project_id}/preview?access_token={token}&version=2')
+        assert 'window.Forma=Object.freeze' in old_fastapi_preview.text
+        static_preview = client.get(f'/api/projects/{project_id}/preview?access_token={token}&version=3')
+        assert 'window.Forma=Object.freeze' not in static_preview.text
+        assert client.get(f'/api/projects/{project_id}/runtime/3/health', headers=auth(token)).status_code == 409
+
+        response = client.post(f'/api/projects/{project_id}/publish', headers=auth(token), json={})
+        assert response.status_code == 200
+        assert client.get(f'/apps/{project_id}/api/health').status_code == 404
+        assert 'privatePreview=false' not in client.get(f'/apps/{project_id}/').text
+        assert client.delete(f'/api/projects/{project_id}', headers=auth(token)).status_code == 200
+
+
+def test_deferred_architecture_migration_returns_working_then_updates():
+    with TestClient(app) as client:
+        token = register(client, 'deferred-migration@example.com')
+        response = client.post('/api/projects', headers=auth(token), json={
+            'name': 'Deferred Migration', 'brief': 'A personal workspace ready for a later shared API.',
+            'backend_mode': 'static', 'auto_mode': False,
+        })
+        project = response.json()
+        project_id = project['id']
+        for _ in range(3):
+            response = client.post(f'/api/projects/{project_id}/advance', headers=auth(token), json={})
+            project = response.json()
+        assert project['current_version'] == 1
+
+        response = client.post(f'/api/projects/{project_id}/architecture', headers=auth(token), json={
+            'target_mode': 'fastapi', 'feedback': '', 'defer': True,
+        })
+        assert response.status_code == 200, response.text
+        project = response.json()
+        assert project['status'] == 'working'
+        assert project['current_version'] == 1 and project['backend_mode'] == 'static'
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            project = client.get(f'/api/projects/{project_id}', headers=auth(token)).json()
+            if project['status'] != 'working':
+                break
+            time.sleep(0.05)
+        assert project['status'] == 'ready', project['messages'][-1]['content']
+        assert project['backend_mode'] == 'fastapi'
+        assert project['current_version'] == 2 and project['phase_index'] == 1
+        assert project['stage'] == 'build'
+        assert client.delete(f'/api/projects/{project_id}', headers=auth(token)).status_code == 200

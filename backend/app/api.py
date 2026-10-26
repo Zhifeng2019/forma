@@ -5,9 +5,10 @@ from fastapi.responses import HTMLResponse, Response
 import httpx
 from .database import control_db, workspace_db, rows
 from .deps import current_user, admin_user, owned_project
-from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput
+from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput, ArchitectureInput
 from .security import hash_password, verify_password, create_token, encrypt_secret, decrypt_secret
-from .engine import add_message, add_event, save_artifact, generate_stage, safe_selector
+from .engine import add_message, add_event, save_artifact, generate_stage, migrate_architecture, safe_selector
+from .llm import GenerationError
 from .backend_engine import BACKEND_PATH, REQUIREMENTS_PATH
 from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manager
 
@@ -201,7 +202,7 @@ def project_payload(user_id, project_id):
         result['backend_enabled'] = result['backend_mode'] == 'fastapi'
         result['messages'] = rows(db.execute('SELECT * FROM messages WHERE project_id=? ORDER BY id', (project_id,)))
         result['events'] = rows(db.execute('SELECT * FROM events WHERE project_id=? ORDER BY id DESC LIMIT 30', (project_id,)))
-        result['versions'] = rows(db.execute('SELECT id,version,label,note,created_at FROM versions WHERE project_id=? ORDER BY version DESC', (project_id,)))
+        result['versions'] = rows(db.execute('SELECT id,version,label,note,backend_mode,created_at FROM versions WHERE project_id=? ORDER BY version DESC', (project_id,)))
         artifacts = db.execute('''SELECT a.* FROM artifacts a JOIN (SELECT path,MAX(version) version FROM artifacts WHERE project_id=? GROUP BY path) latest
                                   ON a.path=latest.path AND a.version=latest.version WHERE a.project_id=? ORDER BY a.path''', (project_id, project_id))
         result['artifacts'] = rows(artifacts)
@@ -309,13 +310,56 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
     return project_payload(user['id'], project_id)
 
 
-def runtime_artifacts(user_id: int, project_id: str, version: int) -> tuple[str, str]:
+@router.post('/projects/{project_id}/architecture')
+async def change_architecture(project_id: str, body: ArchitectureInput, user=Depends(current_user)):
+    project = owned_project(user['id'], project_id)
+    if project['status'] == 'working':
+        raise HTTPException(409, 'Wait for the current generation to finish before migrating')
+    if project['backend_mode'] == body.target_mode:
+        raise HTTPException(409, f'This project already uses {body.target_mode} architecture')
+    with control_db() as db:
+        from .engine import provider_for_user
+        provider = provider_for_user(db, user['id'])
+
+    async def run_migration() -> None:
+        await migrate_architecture(
+            user['id'], project_id, body.target_mode, provider, body.feedback, deferred=body.defer,
+        )
+        if body.target_mode == 'static' and project_payload(user['id'], project_id)['status'] == 'ready':
+            # Only a successful migration replaces the working preview. Published
+            # FastAPI versions remain available until explicit republication.
+            await runtime_manager.stop_project(project_id, channel='preview')
+
+    try:
+        if body.defer:
+            with workspace_db(user['id']) as db:
+                db.execute("UPDATE projects SET status='working',updated_at=CURRENT_TIMESTAMP WHERE id=?", (project_id,))
+            schedule_generation(user['id'], project_id, run_migration())
+        else:
+            await run_migration()
+    except GenerationError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return project_payload(user['id'], project_id)
+
+
+def version_backend_mode(user_id: int, project_id: str, version: int) -> str:
     with workspace_db(user_id) as db:
-        project = db.execute('SELECT backend_mode FROM projects WHERE id=?', (project_id,)).fetchone()
+        row = db.execute('SELECT backend_mode FROM versions WHERE project_id=? AND version=?',
+                         (project_id, version)).fetchone()
+        if row:
+            return row['backend_mode']
+        project = db.execute('SELECT backend_mode,current_version FROM projects WHERE id=?', (project_id,)).fetchone()
         if not project:
             raise HTTPException(404, 'Project not found')
-        if project['backend_mode'] != 'fastapi':
-            raise HTTPException(409, 'This application is frontend only')
+        if project['current_version'] == version:
+            return project['backend_mode']
+    raise HTTPException(404, 'Version not found')
+
+
+def runtime_artifacts(user_id: int, project_id: str, version: int) -> tuple[str, str]:
+    if version_backend_mode(user_id, project_id, version) != 'fastapi':
+        raise HTTPException(409, 'This version is frontend only')
+    with workspace_db(user_id) as db:
         artifacts = db.execute(
             'SELECT path,content FROM artifacts WHERE project_id=? AND version=? AND path IN (?,?)',
             (project_id, version, BACKEND_PATH, REQUIREMENTS_PATH),
@@ -397,7 +441,7 @@ async def publish_project(project_id: str, body: PublishInput, user=Depends(curr
     version = body.version or project['current_version']
     if not version:
         raise HTTPException(409, 'Build at least one version before publishing')
-    if project['backend_mode'] == 'fastapi':
+    if version_backend_mode(user['id'], project_id, version) == 'fastapi':
         runtime_artifacts(user['id'], project_id, version)
     with workspace_db(user['id']) as db:
         if not db.execute('SELECT 1 FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, 'index.html', version)).fetchone():
@@ -451,7 +495,7 @@ def preview_project(project_id: str, access_token: str, version: int | None = No
     if not artifact:
         raise HTTPException(404, 'No application preview is available yet')
     html = artifact['content']
-    if project['backend_mode'] == 'fastapi':
+    if version_backend_mode(user_id, project_id, version) == 'fastapi':
         html = inject_runtime_bootstrap(html, project_id, version, published=False)
     html = html.replace('</body>', PICKER_SCRIPT + '</body>')
     return HTMLResponse(html, headers={'Cache-Control': 'no-store', 'Content-Security-Policy': "frame-ancestors 'self' http://localhost:5173"})

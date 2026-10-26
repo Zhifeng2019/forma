@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Activity, CheckCircle2, Database, FileText, Globe2, RefreshCw, RotateCcw, Server } from 'lucide-react'
 import { api } from '../api'
 import type { Project, RuntimeState } from '../types'
+import { summarizeRuntimeError } from '../runtimeErrors'
 
 export function BackendPanel({ project, onChanged }: { project: Project; onChanged: () => void }) {
   const [state, setState] = useState<RuntimeState | null>(null)
@@ -34,8 +35,8 @@ export function BackendPanel({ project, onChanged }: { project: Project; onChang
       <div className="runtime-facts"><div><Activity size={16} /><span>Runtime<strong>{state?.status === 'running' ? 'On-demand process' : 'Starts on request'}</strong></span></div><div><Database size={16} /><span>Environment<strong>Per-app Python + SQLite</strong></span></div><div><Globe2 size={16} /><span>API contract<strong>/api/health · v{project.current_version || '—'}</strong></span></div></div>
       <div className="runtime-actions"><button className="button secondary" onClick={() => void load(true)} disabled={busy || !project.current_version}><RefreshCw size={14} />Check health</button><button className="button primary" onClick={restart} disabled={busy || !project.current_version}><RotateCcw className={busy ? 'spin' : ''} size={14} />{busy ? 'Restarting…' : 'Restart preview'}</button></div>
       {state?.started_at && <small className="runtime-started">Preview started {new Date(state.started_at).toLocaleString()} · Published versions run independently.</small>}
-      {state?.last_error && <div className="runtime-error">{state.last_error}</div>}
-      {error && <div className="runtime-error">{error}</div>}
+      {state?.last_error && <RuntimeErrorMessage value={state.last_error} />}
+      {error && <RuntimeErrorMessage value={error} />}
     </section>
     <section className="runtime-workspace">
       <div className="runtime-log"><header><span><Activity size={14} />Runtime output</span><small>Latest 60 lines</small></header><pre>{state?.logs || 'The runtime log will appear after the first API request. Open the preview to start the backend on demand.'}</pre></div>
@@ -43,4 +44,8 @@ export function BackendPanel({ project, onChanged }: { project: Project; onChang
     </section>
     <footer className="runtime-footnote"><CheckCircle2 size={14} /><p>Each version has immutable source. Preview and published processes are separate, and dependencies are pinned. Published APIs are reachable by anyone with the app URL; do not use sensitive data until product-level authentication is added.</p></footer>
   </div>
+}
+
+function RuntimeErrorMessage({ value }: { value: string }) {
+  return <div className="runtime-error"><strong>Backend needs attention</strong><p>{summarizeRuntimeError(value)}</p><details><summary>Technical details</summary><pre>{value}</pre></details></div>
 }

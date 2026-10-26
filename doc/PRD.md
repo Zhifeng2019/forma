@@ -1,7 +1,7 @@
 # Forma Studio — AI-Native Application Builder
 
-**Document status:** Updated to reflect the implemented optional-backend release
-**Current release:** Forma Studio v1.1
+**Document status:** Updated to reflect the implemented architecture-migration release
+**Current release:** Forma Studio v1.2
 **Product name:** *Forma* comes from the Latin word for form, shape, or structure. It represents turning an unstructured idea into a working product.
 
 ## 1. Product overview
@@ -20,11 +20,13 @@ The product is built around a visible development cycle rather than a single pro
 - Support multiple production LLM providers through administrator configuration.
 - Isolate each user’s projects and artifacts in a dedicated SQLite workspace.
 
-### v1.1 scope
+### v1.2 scope
 
 Forma generates and hosts portable, single-page HTML applications with embedded CSS and JavaScript. A project can remain frontend-only or include a generated FastAPI backend with one `main.py`, a pinned `requirements.txt`, and an application-local SQLite workspace. Both architectures follow the same six-stage workflow.
 
-The initial backend runtime supports the reviewed FastAPI/Pydantic/Uvicorn stack and an allowlist of Python standard-library imports. It is a local process-isolation runtime, not a hardened multi-tenant security sandbox. General multi-file projects, arbitrary dependencies, production container isolation, and managed end-user authentication remain future work.
+Existing projects can migrate in either direction as a new version without advancing the current phase. Architecture is stored on every version, so historical previews and published releases retain their original behavior until explicit republication. Migration uses the selected model provider or Forma Local.
+
+The initial backend runtime supports the reviewed FastAPI/Pydantic/Uvicorn/email-validator stack and an allowlist of Python standard-library imports. It is a local process-isolation runtime, not a hardened multi-tenant security sandbox. General multi-file projects, arbitrary dependencies, production container isolation, and managed end-user authentication remain future work.
 
 ## 2. Target users
 
@@ -130,6 +132,14 @@ The builder provides:
 Project creation opens the workspace immediately in a working state while generation runs in an in-memory background job. The builder polls working projects and active autopilot projects, refreshes the preview when a new version arrives, and stops at review or an error. Studio shutdown marks interrupted jobs as retryable errors; durable resumable jobs remain future work.
 
 User messages appear in the conversation immediately with a working indicator. A failed request removes the unconfirmed optimistic message and restores the composer. During build and review, a feedback message creates a refinement of the **current phase** without changing its approval state. Only the explicit approval action advances to the next phase.
+
+### 4.4.1 Architecture migration
+
+The architecture control in the builder lets an existing project move from frontend-only to FastAPI or from FastAPI to frontend-only. Migration creates a new version and never counts as phase approval. Before the first build, the selection changes the foundation for the upcoming version instead. Migration runs as a deferred background job: the dialog closes immediately, a migration-specific working label appears, and polling refreshes the preview when the new version is ready rather than blocking the workspace on the model response.
+
+Every version stores its architecture. Preview bootstrap injection, private runtime access, and public hosting all resolve architecture from the selected version rather than the project’s current mode. Migrating a working version does not alter the published version. Moving to frontend-only stops only the working FastAPI preview; an existing public FastAPI process remains available until the user republishes or unpublishes it. Version history labels include the architecture and migration type.
+
+The Server panel presents an actionable error summary first and preserves complete runtime output under expandable technical details. Non-fatal platform notes are not presented as the primary failure.
 
 ### 4.5 Review and improvement
 
@@ -264,6 +274,8 @@ The optional-backend release is accepted when:
 - Automatic architecture selection chooses a backend for server-dependent briefs and preserves a frontend-only path for browser-only products.
 - Early-stage feedback modifies the corresponding document.
 - Three implementation phases create working application versions.
+- Existing projects migrate in both directions without advancing the phase, and each historical version retains its correct architecture.
+- A published static version remains static after a FastAPI migration; a published FastAPI version remains operational after migrating the working version to static until republication.
 - Deferred creation and autopilot refresh the workspace through the final preview without a manual page reload.
 - A user message appears immediately even while its model request is delayed; failed sends restore the composer.
 - Feedback during a build phase creates a refinement without advancing that phase; explicit approval is required to advance.
@@ -271,6 +283,7 @@ The optional-backend release is accepted when:
 - FastAPI versions contain reviewable HTML, Python, and pinned dependency artifacts.
 - Dependencies install from the configured Aliyun mirror into the application’s own virtual environment, and imports are verified inside that environment without shared-package links.
 - A generated backend passes a real startup health check, supports CRUD requests, and persists SQLite data across restart.
+- Real-provider architecture migration produces a healthy backend while preserving the published static version.
 - Private runtime access rejects unauthenticated requests and users who do not own the project.
 - An unpublished application and its API are not publicly accessible.
 - Publishing exposes the selected HTML and API version; unpublishing stops public access while private preview remains usable.
@@ -282,12 +295,11 @@ The optional-backend release is accepted when:
 
 ## 10. Planned next iterations
 
-The following capabilities are not part of the v1.1 runtime:
+The following capabilities are not part of the v1.2 runtime:
 
 - Hardened container sandboxing with enforced CPU, memory, network, and syscall policies for untrusted multi-tenant execution.
 - Generated multi-file frontend projects and backend source packages, plus broader reviewed dependency support.
 - One shared Node dependency environment per user for generated multi-file frontends.
-- Architecture migration for existing projects, including adding a backend after the first build has already been generated.
 - Managed product-level authentication, authorization, storage, and separate preview/published application databases.
 - Specialist-agent delegation for parallel frontend, backend, and verification work.
 - Streaming model output and resumable background generation jobs.

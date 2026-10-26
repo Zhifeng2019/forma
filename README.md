@@ -10,10 +10,11 @@ Forma is an AI-native application builder built around a guided product-developm
 - An offline **Forma Local** engine for deterministic demos without external credentials.
 - Product, design, and implementation-plan Markdown artifacts.
 - Automatic or explicit architecture selection: frontend-only HTML or HTML plus a dedicated FastAPI backend.
+- Bidirectional architecture migration for existing projects, with immediate migration progress, automatic preview refresh, version-specific architecture, preserved phase state, and unchanged published releases until republishing.
 - Three implementation phases with working previews and version history.
 - Versioned `main.py` and pinned `requirements.txt` artifacts for backend-enabled applications.
 - Per-app Python environments with packages physically installed from the Aliyun PyPI mirror, application-local SQLite persistence, health checks, runtime logs, and independent preview/public processes.
-- A Server panel for backend health, source review, diagnostics, and preview restart.
+- A Server panel for backend health, source review, actionable error summaries with expandable technical details, and preview restart.
 - Immediate optimistic chat updates and automatic workspace refresh while generation or autopilot is running.
 - Feedback that refines the current phase without advancing it; only explicit approval moves to the next phase.
 - Conversational revisions and preview element selection for targeted feedback.

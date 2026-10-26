@@ -46,3 +46,9 @@ class StageInput(BaseModel):
 
 class PublishInput(BaseModel):
     version: int | None = None
+
+
+class ArchitectureInput(BaseModel):
+    target_mode: Literal['static', 'fastapi']
+    feedback: str = Field(default='', max_length=2000)
+    defer: bool = False

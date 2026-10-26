@@ -169,8 +169,8 @@ async def _advance(
                     html = application_html(name, brief, phase, feedback)
             save_artifact(db, project_id, 'build', 'index.html', html, version)
             version_label = 'Refinement' if revise or stage == 'review' else f'Phase {phase}'
-            db.execute('INSERT INTO versions(project_id,version,label,note) VALUES(?,?,?,?)',
-                       (project_id, version, version_label, feedback or STAGE_LABELS[stage]))
+            db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode) VALUES(?,?,?,?,?)',
+                       (project_id, version, version_label, feedback or STAGE_LABELS[stage], backend_mode))
             next_stage = stage if revise else 'build' if phase < 3 else 'review'
             index = project['stage_index'] if revise else 3 if phase < 3 else 4
             db.execute('UPDATE projects SET phase_index=? WHERE id=?', (phase, project_id))
@@ -186,6 +186,118 @@ async def _advance(
         completion = f'Feedback applied to version {version}' if revise and stage in {'build', 'review'} else f'{STAGE_LABELS[stage]} completed'
         add_event(db, project_id, completion, 'success')
         add_message(db, project_id, 'agent', message, 'stage', {'stage': next_stage, 'version': version})
+
+
+async def migrate_architecture(
+    user_id: int, project_id: str, target: str, provider: dict | None, feedback: str = '',
+    deferred: bool = False,
+) -> None:
+    if target not in {'static', 'fastapi'}:
+        raise GenerationError('Choose either frontend-only or FastAPI architecture.')
+    if project_id in _running:
+        raise GenerationError('This project is already being updated.')
+    with workspace_db(user_id) as db:
+        project = get_project(db, project_id)
+        if not project:
+            return
+        if project['backend_mode'] == target:
+            raise GenerationError(f'This project already uses {target} architecture.')
+        if project['status'] == 'working' and not deferred:
+            raise GenerationError('Wait for the current generation to finish before migrating.')
+    _running.add(project_id)
+    try:
+        with workspace_db(user_id) as db:
+            db.execute("UPDATE projects SET status='working',updated_at=? WHERE id=?", (now(), project_id))
+            add_event(db, project_id, f'Architecture migration to {target} started')
+        try:
+            await _migrate_architecture(user_id, project_id, target, provider, feedback)
+        except Exception as exc:
+            with workspace_db(user_id) as db:
+                db.execute("UPDATE projects SET status='error',updated_at=? WHERE id=?", (now(), project_id))
+                add_event(db, project_id, str(exc), 'error')
+                add_message(db, project_id, 'agent', f'I hit a problem: {exc}', 'error')
+    finally:
+        _running.discard(project_id)
+
+
+async def _migrate_architecture(
+    user_id: int, project_id: str, target: str, provider: dict | None, feedback: str,
+) -> None:
+    with workspace_db(user_id) as db:
+        project = get_project(db, project_id)
+        name, brief = project['name'], project['brief']
+        version = project['current_version']
+        reason = ('Added a dedicated FastAPI service and shared application state.' if target == 'fastapi'
+                  else 'Moved to a portable frontend-only architecture without a product server.')
+        if feedback:
+            reason = f'{reason} Direction: {feedback[:240]}'
+        if not version:
+            db.execute('UPDATE projects SET backend_mode=?,backend_reason=?,status=?,updated_at=? WHERE id=?',
+                       (target, reason, 'ready', now(), project_id))
+            add_event(db, project_id, f'Architecture changed to {target} before the first build', 'success')
+            add_message(db, project_id, 'agent',
+                        f'Architecture updated to {target}. The next build will use this foundation.', 'stage',
+                        {'stage': project['stage'], 'version': 0})
+            return
+
+        current = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?',
+                             (project_id, 'index.html', version)).fetchone()
+        if not current:
+            raise GenerationError('The current application source is unavailable for migration.')
+        current_backend = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?',
+                                     (project_id, BACKEND_PATH, version)).fetchone()
+        phase = max(1, project['phase_index'])
+        next_version = version + 1
+        direction = (f'Architecture migration to {target}. Preserve the current visual design and working interactions. '
+                     f'User direction: {feedback or "None"}')
+        if target == 'fastapi':
+            direction += (' Replace browser-owned shared state with the new FastAPI service. Keep the existing '
+                          'frontend recognizable while adding a complete API and Forma.api integration.')
+            if provider:
+                result = await complete(
+                    provider,
+                    'You are an expert full-stack engineer performing a careful architecture migration.',
+                    application_prompt(name, brief, phase, direction, current['content'],
+                                       current_backend['content'] if current_backend else ''),
+                )
+                html, python_source, requirements = validate_application(
+                    result.get('html', ''), result.get('python', result.get('backend', '')),
+                )
+            else:
+                html, python_source, requirements = validate_application(
+                    local_backend_html(name, brief, phase), local_backend_source(name),
+                )
+            save_artifact(db, project_id, 'build', BACKEND_PATH, python_source, next_version)
+            save_artifact(db, project_id, 'build', REQUIREMENTS_PATH, requirements, next_version)
+        else:
+            direction += (' Remove Forma.api and every server dependency. Preserve the product workflow with '
+                          'browser-local state and a complete static HTML document.')
+            if provider:
+                result = await complete(
+                    provider,
+                    'You are an expert frontend engineer performing a careful migration to a static application.',
+                    f'Product: {name}\nBrief: {brief}\n{direction}\nCurrent HTML:\n{current["content"]}\n'
+                    f'Current backend whose behavior should be adapted into browser state:\n'
+                    f'{current_backend["content"] if current_backend else "None"}\n'
+                    'Return {"html":"<!doctype html>..."}. The result must not contain Forma.api or require a server.',
+                )
+                html = result.get('html', '')
+                if '<html' not in html.lower() or '</html>' not in html.lower():
+                    raise GenerationError('The migrated application was not a complete HTML document.')
+                if re.search(r'(?:window\.)?Forma\.api\s*\(', html):
+                    raise GenerationError('The frontend-only migration still contains backend calls. Please retry.')
+            else:
+                html = application_html(name, brief, phase, direction)
+        save_artifact(db, project_id, 'build', 'index.html', html, next_version)
+        label = 'FastAPI migration' if target == 'fastapi' else 'Frontend-only migration'
+        db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode) VALUES(?,?,?,?,?)',
+                   (project_id, next_version, label, feedback or reason, target))
+        db.execute('''UPDATE projects SET backend_mode=?,backend_reason=?,current_version=?,status=?,updated_at=?
+                      WHERE id=?''', (target, reason, next_version, 'ready', now(), project_id))
+        add_event(db, project_id, f'Architecture migrated to {target} as version {next_version}', 'success')
+        add_message(db, project_id, 'agent',
+                    f'Version {next_version} now uses {target}. Your phase and published release are unchanged.',
+                    'stage', {'stage': project['stage'], 'version': next_version})
 
 
 def safe_selector(selection: dict | None) -> str:

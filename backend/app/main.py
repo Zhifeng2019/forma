@@ -18,7 +18,7 @@ async def lifespan(_app):
     await runtime_manager.stop_all()
 
 
-app = FastAPI(title='Forma — AI Product Studio', version='1.1.0', lifespan=lifespan)
+app = FastAPI(title='Forma — AI Product Studio', version='1.2.0', lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(','),
                    allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
 app.include_router(router)
@@ -33,14 +33,16 @@ def published_app(project_id: str):
     for path in (settings.data_path / 'users').glob('user_*.db'):
         user_id = int(path.stem.split('_')[1])
         with workspace_db(user_id) as db:
-            project = db.execute('SELECT published_version,backend_mode FROM projects WHERE id=?', (project_id,)).fetchone()
+            project = db.execute('''SELECT p.published_version,p.backend_mode current_mode,v.backend_mode version_mode
+                                    FROM projects p LEFT JOIN versions v ON v.project_id=p.id AND v.version=p.published_version
+                                    WHERE p.id=?''', (project_id,)).fetchone()
             if project and project['published_version']:
                 artifact = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?',
                                       (project_id, 'index.html', project['published_version'])).fetchone()
                 if artifact:
                     return {
                         'user_id': user_id, 'version': project['published_version'],
-                        'backend_mode': project['backend_mode'], 'html': artifact['content'],
+                        'backend_mode': project['version_mode'] or project['current_mode'], 'html': artifact['content'],
                     }
     raise HTTPException(404, 'This application is not published')
 

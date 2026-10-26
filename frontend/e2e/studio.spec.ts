@@ -155,3 +155,62 @@ test('autopilot refreshes the workspace through the final preview', async ({ pag
     if (projectId && token) await page.request.delete(`/api/projects/${projectId}`, { headers: { Authorization: `Bearer ${token}` } })
   }
 })
+
+test('an existing app migrates between frontend-only and FastAPI without changing phase', async ({ page }) => {
+  test.setTimeout(240_000)
+  const email = `e2e-migration-${Date.now()}@example.com`
+  await page.goto('/register')
+  await page.getByLabel('Full name').fill('Migration End To End')
+  await page.getByLabel('Email address').fill(email)
+  await page.getByLabel('Password', { exact: true }).fill('password123')
+  await page.getByRole('button', { name: 'Create my studio' }).click()
+  const token = await page.evaluate(() => localStorage.getItem('forma_token'))
+  let projectId = ''
+  try {
+    await page.getByRole('button', { name: 'New application' }).click()
+    await page.getByLabel('Application name').fill('Migration Studio')
+    await page.getByLabel('Tell us about your idea').fill('A personal planning workspace that may later need shared team data.')
+    await page.locator('.architecture-options label').filter({ hasText: 'Frontend only' }).click()
+    await page.getByRole('button', { name: 'Start building' }).click()
+    await expect(page).toHaveURL(/\/projects\/[a-f0-9]{32}/)
+    projectId = page.url().split('/').pop() || ''
+    await page.getByRole('button', { name: 'Approve design' }).click()
+    await expect(page.getByRole('button', { name: 'Start building' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Start building' }).click()
+    await page.getByRole('button', { name: 'Build phase 1' }).click()
+    await expect(page.getByRole('button', { name: 'Approve phase 1' })).toBeEnabled()
+
+    await page.locator('.architecture-button').click()
+    await expect(page.getByRole('heading', { name: 'Add a FastAPI backend?' })).toBeVisible()
+    let releaseMigration: () => void = () => {}
+    let migrationHandled = false
+    await page.route('**/api/projects/*/architecture', async route => {
+      await new Promise<void>(resolve => { releaseMigration = resolve })
+      await route.continue()
+      migrationHandled = true
+    })
+    await page.getByRole('button', { name: 'Add FastAPI', exact: true }).click()
+    try {
+      await expect(page.getByRole('heading', { name: 'Add a FastAPI backend?' })).toHaveCount(0)
+      await expect(page.locator('.approval-bar').getByText('Migrating to FastAPI…', { exact: true })).toBeVisible()
+    } finally { releaseMigration() }
+    await expect.poll(() => migrationHandled).toBe(true)
+    await page.unroute('**/api/projects/*/architecture')
+    const frame = page.frameLocator('iframe')
+    await expect(frame.getByText('FastAPI connected')).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByRole('button', { name: 'Approve phase 1' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Approve phase 2' })).toHaveCount(0)
+
+    await page.locator('.architecture-button').click()
+    await expect(page.getByRole('heading', { name: 'Move to frontend-only?' })).toBeVisible()
+    await page.getByRole('button', { name: 'Switch to frontend only', exact: true }).click()
+    await expect(frame.getByRole('heading', { name: 'Make good work feel effortless.' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Server', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Approve phase 1' })).toBeEnabled()
+    await page.getByRole('button', { name: 'History', exact: true }).click()
+    await expect(page.getByText('Version 2 · FastAPI migration', { exact: true })).toBeVisible()
+    await expect(page.getByText('Version 3 · Frontend-only migration', { exact: true })).toBeVisible()
+  } finally {
+    if (projectId && token) await page.request.delete(`/api/projects/${projectId}`, { headers: { Authorization: `Bearer ${token}` } })
+  }
+})
