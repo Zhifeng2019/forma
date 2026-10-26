@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "captured_at": "2026-10-26T14:03:21.092892+00:00",
+  "source": "local-regression-suite",
+  "suites": {
+    "backend": {
+      "status": "passed",
+      "passed": 31,
+      "failed": 0,
+      "duration_ms": 167644
+    },
+    "frontend_unit": {
+      "status": "passed",
+      "passed": 5,
+      "failed": 0,
+      "duration_ms": 723
+    },
+    "browser": {
+      "status": "skipped",
+      "reason": "--skip-browser was supplied",
+      "passed": 0,
+      "failed": 0,
+      "duration_ms": 0
+    },
+    "provider_smoke": {
+      "status": "skipped",
+      "reason": "real-provider evaluation is opt-in and is not part of baseline capture",
+      "passed": 0,
+      "failed": 0,
+      "duration_ms": 0
+    }
+  },
+  "compatibility": {
+    "source_formats": [
+      "single-file",
+      "multi-file"
+    ],
+    "backend_modes": [
+      "static",
+      "fastapi"
+    ],
+    "publish_states": [
+      "published",
+      "unpublished"
+    ],
+    "history_states": [
+      "current",
+      "historical"
+    ],
+    "fixtures": [
+      "empty-python-init",
+      "native-fetch-adapter",
+      "missing-requirements",
+      "truncated-model-output",
+      "invalid-json",
+      "invalid-package-structure"
+    ]
+  }
+}

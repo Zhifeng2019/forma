@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS preferences (
  user_id INTEGER PRIMARY KEY, provider_id INTEGER, auto_mode INTEGER NOT NULL DEFAULT 0,
  theme TEXT NOT NULL DEFAULT 'light', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS deployment_registry (
+ project_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, published_version INTEGER NOT NULL,
+ backend_mode TEXT NOT NULL, source_format TEXT NOT NULL, runtime_metadata TEXT NOT NULL DEFAULT '{}',
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_deployment_registry_user ON deployment_registry(user_id);
 '''
 
 WORKSPACE_SCHEMA = '''
@@ -51,6 +57,56 @@ CREATE TABLE IF NOT EXISTS events (
  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, message TEXT NOT NULL,
  level TEXT NOT NULL DEFAULT 'info', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS generation_jobs (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL, stage TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN (
+  'queued','leased','running','waiting_on_tool','finalizing','retry_scheduled',
+  'waiting_for_approval','cancel_requested','cancelling','cancelled','succeeded',
+  'failed','dead_letter','recovery_required')),
+ input_hash TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+ current_attempt INTEGER NOT NULL DEFAULT 0, trace_id TEXT NOT NULL,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(project_id,idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_generation_jobs_project ON generation_jobs(project_id);
+CREATE INDEX IF NOT EXISTS idx_generation_jobs_status ON generation_jobs(status,created_at);
+CREATE INDEX IF NOT EXISTS idx_generation_jobs_trace ON generation_jobs(trace_id);
+CREATE TABLE IF NOT EXISTS job_attempts (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, attempt_number INTEGER NOT NULL,
+ worker_id TEXT NOT NULL, lease_expires_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL,
+ started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ended_at TEXT, failure_code TEXT,
+ UNIQUE(job_id,attempt_number),
+ FOREIGN KEY(job_id) REFERENCES generation_jobs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_job_attempts_lease ON job_attempts(ended_at,lease_expires_at);
+CREATE TABLE IF NOT EXISTS job_events (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, event_type TEXT NOT NULL,
+ payload TEXT NOT NULL DEFAULT '{}', dedupe_key TEXT,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(job_id,dedupe_key),
+ FOREIGN KEY(job_id) REFERENCES generation_jobs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(job_id,id);
+CREATE TABLE IF NOT EXISTS tool_runs (
+ id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_id INTEGER,
+ tool_name TEXT NOT NULL, tool_version TEXT NOT NULL, input_hash TEXT NOT NULL,
+ output_ref TEXT, status TEXT NOT NULL, retry_count INTEGER NOT NULL DEFAULT 0,
+ started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ended_at TEXT, provenance TEXT NOT NULL DEFAULT '{}',
+ FOREIGN KEY(job_id) REFERENCES generation_jobs(id) ON DELETE CASCADE,
+ FOREIGN KEY(attempt_id) REFERENCES job_attempts(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_runs_job ON tool_runs(job_id,tool_name);
+CREATE TABLE IF NOT EXISTS usage_ledger (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, tool_run_id TEXT,
+ provider TEXT, model TEXT, input_tokens INTEGER NOT NULL DEFAULT 0,
+ output_tokens INTEGER NOT NULL DEFAULT 0, estimated_cost REAL NOT NULL DEFAULT 0,
+ latency_ms INTEGER NOT NULL DEFAULT 0, metadata TEXT NOT NULL DEFAULT '{}',
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(tool_run_id),
+ FOREIGN KEY(job_id) REFERENCES generation_jobs(id) ON DELETE CASCADE,
+ FOREIGN KEY(tool_run_id) REFERENCES tool_runs(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_ledger_job ON usage_ledger(job_id);
 '''
 
 
@@ -94,6 +150,23 @@ def init_databases():
         user_ids = [row['id'] for row in db.execute('SELECT id FROM users')]
     for user_id in user_ids:
         workspace_for(user_id)
+        backfill_deployment_registry(user_id)
+
+
+def backfill_deployment_registry(user_id: int) -> None:
+    with workspace_db(user_id) as workspace:
+        projects = workspace.execute('''SELECT p.id,p.published_version,
+            COALESCE(v.backend_mode,p.backend_mode) backend_mode,
+            COALESCE(v.source_format,p.source_format) source_format
+            FROM projects p LEFT JOIN versions v ON v.project_id=p.id AND v.version=p.published_version
+            WHERE p.published_version IS NOT NULL''').fetchall()
+    with control_db() as control:
+        for project in projects:
+            control.execute('''INSERT OR IGNORE INTO deployment_registry(
+                project_id,user_id,published_version,backend_mode,source_format,runtime_metadata)
+                VALUES(?,?,?,?,?,?)''',
+                (project['id'], user_id, project['published_version'], project['backend_mode'],
+                 project['source_format'], '{}'))
 
 
 def workspace_for(user_id: int):

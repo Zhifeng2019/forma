@@ -6,7 +6,7 @@ import shutil
 import sys
 import tempfile
 
-TEST_ROOT = Path(__file__).parents[1] / 'data' / 'test-runtimes'
+TEST_ROOT = Path(__file__).parents[2] / 'data' / 'test-runtimes'
 TEST_ROOT.mkdir(parents=True, exist_ok=True)
 TEST_DATA = Path(tempfile.mkdtemp(prefix='forma-test-', dir=TEST_ROOT))
 os.environ['DATA_DIR'] = str(TEST_DATA)

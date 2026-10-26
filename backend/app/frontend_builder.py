@@ -12,6 +12,7 @@ import zipfile
 
 from .config import settings
 from .source_packages import frontend_package_json, frontend_vite_config
+from .spec.schema import SPEC_ARTIFACT_PATHS
 
 
 class PackageBuildError(RuntimeError):
@@ -46,7 +47,8 @@ def write_source_files(project_id: str, version: int, files: dict[str, str]) -> 
 
 
 def _digest(files: dict[str, str]) -> str:
-    payload = json.dumps(files, sort_keys=True) + frontend_package_json() + frontend_vite_config() + 'vite-react-package-v1'
+    source = {path: content for path, content in files.items() if path not in SPEC_ARTIFACT_PATHS}
+    payload = json.dumps(source, sort_keys=True) + frontend_package_json() + frontend_vite_config() + 'vite-react-package-v1'
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

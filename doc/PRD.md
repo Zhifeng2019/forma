@@ -67,7 +67,7 @@ Reviewed Python dependencies include FastAPI, Pydantic, Uvicorn, email-validator
 
 ### Generated application runtime
 
-- Each backend-enabled application has its own Python virtual environment and directory under `backend/data/projects/<application-id>/`.
+- Each backend-enabled application has its own Python virtual environment and directory under `data/projects/<application-id>/`.
 - Each environment installs pinned dependencies into its own `site-packages` using its own `.venv/bin/python -m pip` and the Aliyun mirror `https://mirrors.aliyun.com/pypi/simple/` (configurable with `RUNTIME_PIP_INDEX_URL`). Studio and machine site-packages are not inherited.
 - Startup verifies package versions and physical import locations inside the application environment. Legacy shared-package links are removed and replaced with local installations before the backend can start. Older artifacts missing support packages, including `email-validator` for Pydantic `EmailStr`, are augmented during installation without rewriting the artifacts.
 - Single-file backends keep immutable `versions/v<N>/main.py` and `requirements.txt`. Multi-file backends use `versions/v<N>/backend/main.py` plus the generated `backend/app/` package modules.

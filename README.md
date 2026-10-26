@@ -45,7 +45,7 @@ cd backend
 /Users/zhifengzhang/python_env/env_ai_build/bin/python -m uvicorn app.main:app --reload --reload-exclude 'data/**' --port 8000
 ```
 
-The initial local administrator is `admin@forma.local` with password `admin123`. Change this account before exposing the service publicly. All data is development-local by default under `backend/data/`.
+The initial local administrator is `admin@forma.local` with password `admin123`. Change this account before exposing the service publicly. All data is development-local by default under `data/`.
 
 ## Generated project packages
 
@@ -63,7 +63,7 @@ The Source tab displays current-version files. Deployment downloads include fron
 
 ## Generated FastAPI runtime
 
-Backend-enabled applications live under `backend/data/projects/<application-id>/` with one virtual environment, immutable source directories for each version, and an application-local SQLite working directory. Preview and published processes start on demand and have independent lifecycles; their application database is shared across restarts and versions.
+Backend-enabled applications live under `data/projects/<application-id>/` with one virtual environment, immutable source directories for each version, and an application-local SQLite working directory. Preview and published processes start on demand and have independent lifecycles; their application database is shared across restarts and versions.
 
 Each environment installs its pinned dependencies using its own `.venv/bin/python -m pip` and the Aliyun mirror `https://mirrors.aliyun.com/pypi/simple/` (configurable with `RUNTIME_PIP_INDEX_URL`). Inherited studio and machine site-packages are disabled. Before startup, Forma verifies both the package versions and that FastAPI, Uvicorn, Pydantic, and email-validator import from the application’s own `site-packages`. Older artifacts missing support packages such as `email-validator` are augmented during installation without rewriting those artifacts. Runtime requests have health checks, timeouts, body/concurrency limits, and owner-only diagnostics. Unpublish and delete operations stop their corresponding processes.
 
@@ -72,6 +72,23 @@ Published APIs are public with the application URL and do not require a Forma se
 ## Production shape
 
 Build the frontend with `npm run build`; FastAPI serves `frontend/dist` when present. Set a strong `SECRET_KEY`, restrict `CORS_ORIGINS`, put the service behind HTTPS, and replace the initial administrator credentials. Do not expose generated-code execution to untrusted users without a container or equivalent security sandbox.
+
+## v1.4 implementation track
+
+The v1.4 work is additive and disabled by default. Task status and acceptance evidence are tracked in [doc/IMPLEMENTATION.md](doc/IMPLEMENTATION.md).
+
+- Typed feature flags cover durable jobs, AppSpec, acceptance gates, specialist workers, and sandboxing.
+- The durable runner supports idempotent jobs, attempts, checkpoints, heartbeat, cancellation, retry, and stale-finalization protection for stage generation, document revision, and architecture migration.
+- AppSpec v1 provides a typed contract, deterministic package compiler, legacy adapter, and dual-written `appspec.json` and `build-manifest.json` provenance for new and migrated versions when `APPSPEC_V1` is enabled.
+- AppSpec currently coexists with the existing source generators. Schema-aware model proposals, resumable SSE, full tool telemetry, deterministic release gates, specialist workers, and sandboxing remain separate tracked tasks.
+
+Regenerate the evaluation baseline with:
+
+```bash
+cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/capture_baseline.py
+```
+
+Use `--skip-browser` for a backend/frontend-only capture. Baseline output is written to `backend/tests/evals/baseline.json`.
 
 ## Tests
 

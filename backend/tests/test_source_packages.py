@@ -74,7 +74,8 @@ def test_multi_file_package_preview_publish_and_download():
             response = client.post(f'/api/projects/{project_id}/advance', headers=auth(token), json={})
             assert response.status_code == 200, response.text
             project = response.json()
-        assert project['status'] == 'ready' and project['current_version'] == 1
+        assert project['status'] == 'ready', project['messages'][-1]['content']
+        assert project['current_version'] == 1
         paths = {artifact['path'] for artifact in project['artifacts']}
         assert 'frontend/src/App.jsx' in paths and 'backend/app/api.py' in paths
         assert project['versions'][0]['source_format'] == 'multi-file'

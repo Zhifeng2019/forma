@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0",
+  "compiler_version": "1.0",
+  "product": {
+    "name": "Item Manager",
+    "brief": "A shared workspace for tracking item priorities.",
+    "users": ["Team members"],
+    "primary_workflow": "Create, complete, and remove priorities.",
+    "acceptance_goals": ["The team can manage priorities through a working API."]
+  },
+  "architecture": {
+    "backend_mode": "fastapi",
+    "source_format": "multi-file",
+    "state_ownership": "server"
+  },
+  "entities": [
+    {
+      "name": "Item",
+      "fields": [
+        {"name": "id", "kind": "integer", "required": true},
+        {"name": "title", "kind": "string", "required": true, "constraints": {"maxLength": 160}},
+        {"name": "completed", "kind": "boolean", "required": true}
+      ],
+      "relationships": []
+    }
+  ],
+  "api": [
+    {"name": "Runtime health", "method": "GET", "path": "/api/health"},
+    {"name": "List items", "method": "GET", "path": "/api/items", "entity": "Item"},
+    {"name": "Create item", "method": "POST", "path": "/api/items", "entity": "Item", "errors": ["Validation error"]}
+  ],
+  "frontend": {
+    "components": ["App", "Workspace"],
+    "routes": ["/"],
+    "state_adapter": "forma-api",
+    "accessibility": ["keyboard-navigation", "responsive-layout"]
+  },
+  "dependencies": {
+    "python": [],
+    "npm": ["react", "react-dom", "lucide-react", "vite", "@vitejs/plugin-react"]
+  },
+  "manifest": {
+    "files": [
+      {"path": "frontend/package.json", "owner": "supervisor"},
+      {"path": "frontend/vite.config.js", "owner": "supervisor"},
+      {"path": "backend/requirements.txt", "owner": "supervisor"},
+      {"path": "frontend/index.html", "owner": "frontend"},
+      {"path": "frontend/src/main.jsx", "owner": "frontend"},
+      {"path": "frontend/src/App.jsx", "owner": "frontend"},
+      {"path": "frontend/src/api.js", "owner": "frontend"},
+      {"path": "frontend/src/components/Workspace.jsx", "owner": "frontend"},
+      {"path": "frontend/src/styles.css", "owner": "frontend"},
+      {"path": "backend/main.py", "owner": "backend"},
+      {"path": "backend/app/__init__.py", "owner": "backend"},
+      {"path": "backend/app/api.py", "owner": "backend"},
+      {"path": "backend/app/models.py", "owner": "backend"},
+      {"path": "backend/app/database.py", "owner": "backend"}
+    ],
+    "generation_order": [
+      "frontend/package.json",
+      "frontend/vite.config.js",
+      "backend/requirements.txt",
+      "frontend/index.html",
+      "frontend/src/main.jsx",
+      "frontend/src/App.jsx",
+      "frontend/src/api.js",
+      "frontend/src/components/Workspace.jsx",
+      "frontend/src/styles.css",
+      "backend/main.py",
+      "backend/app/__init__.py",
+      "backend/app/api.py",
+      "backend/app/models.py",
+      "backend/app/database.py"
+    ]
+  },
+  "acceptance": [
+    {"name": "Production build", "kind": "build", "target": "frontend/dist/index.html"},
+    {"name": "Health check", "kind": "api", "target": "/api/health"},
+    {"name": "Persistence module", "kind": "persistence", "target": "backend/app/database.py"}
+  ]
+}

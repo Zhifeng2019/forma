@@ -10,6 +10,10 @@ from .backend_engine import (
 )
 from .frontend_builder import ensure_frontend_build
 from .source_packages import local_source_package, package_prompt, validate_source_package
+from .features import FeatureFlag, feature_enabled
+from .jobs.runner import run_generation_job
+from .spec.schema import SPEC_ARTIFACT_PATHS
+from .spec.service import compile_legacy_package, spec_artifacts
 
 STAGES = ['discovery', 'design', 'plan', 'build', 'review', 'deploy']
 STAGE_LABELS = {
@@ -40,6 +44,20 @@ def save_artifact(db, project_id, stage, path, content, version):
 
 def get_project(db, project_id):
     return db.execute('SELECT * FROM projects WHERE id=?', (project_id,)).fetchone()
+
+
+def generation_source_files(db, project_id: str, version: int) -> dict[str, str]:
+    return {row['path']: row['content'] for row in db.execute(
+        'SELECT path,content FROM artifacts WHERE project_id=? AND version=? AND path NOT IN (?,?)',
+        (project_id, version, *SPEC_ARTIFACT_PATHS),
+    )}
+
+
+def compile_with_appspec(project, files: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    if not feature_enabled(FeatureFlag.APPSPEC_V1):
+        return files, {}
+    compiled = compile_legacy_package(project, files)
+    return compiled.files, spec_artifacts(compiled)
 
 
 def provider_for_user(control, user_id):
@@ -75,6 +93,33 @@ async def complete_package(
 
 
 async def generate_stage(
+    user_id: int, project_id: str, provider: dict | None, feedback: str = '', revise: bool = False,
+):
+    if not feature_enabled(FeatureFlag.DURABLE_JOBS_V1):
+        await _generate_stage_legacy(user_id, project_id, provider, feedback, revise)
+        return
+    with workspace_db(user_id) as db:
+        project = get_project(db, project_id)
+        if not project:
+            return
+        stage = project['stage']
+        action = 'revise-stage' if revise else 'advance-stage'
+        input_data = {
+            'project_id': project_id,
+            'stage': stage,
+            'version': project['current_version'],
+            'backend_mode': project['backend_mode'],
+            'source_format': project['source_format'],
+            'feedback': feedback,
+            'revise': revise,
+        }
+    await run_generation_job(
+        user_id, project_id, stage, action, input_data,
+        lambda: _generate_stage_legacy(user_id, project_id, provider, feedback, revise),
+    )
+
+
+async def _generate_stage_legacy(
     user_id: int, project_id: str, provider: dict | None, feedback: str = '', revise: bool = False,
 ):
     if project_id in _running:
@@ -162,17 +207,11 @@ async def _advance(
             backend_mode = project['backend_mode']
             source_format = project['source_format']
             if source_format == 'multi-file':
-                current_files = {row['path']: row['content'] for row in db.execute(
-                    'SELECT path,content FROM artifacts WHERE project_id=? AND version=?',
-                    (project_id, version - 1),
-                )}
+                current_files = generation_source_files(db, project_id, version - 1)
                 if provider:
                     files = await complete_package(provider, name, brief, phase, feedback, backend_mode, current_files)
                 else:
                     files = local_source_package(name, brief, phase, backend_mode)
-                await ensure_frontend_build(db_user, project_id, version, files)
-                for path, content in files.items():
-                    save_artifact(db, project_id, 'build', path, content, version)
             elif backend_mode == 'fastapi':
                 current = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
                                      (project_id, 'index.html')).fetchone()
@@ -194,8 +233,6 @@ async def _advance(
                     html, python_source, requirements = validate_application(
                         local_backend_html(name, brief, phase), local_backend_source(name),
                     )
-                save_artifact(db, project_id, 'build', BACKEND_PATH, python_source, version)
-                save_artifact(db, project_id, 'build', REQUIREMENTS_PATH, requirements, version)
             else:
                 if provider:
                     current = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
@@ -208,7 +245,16 @@ async def _advance(
                 else:
                     html = application_html(name, brief, phase, feedback)
             if source_format == 'single-file':
-                save_artifact(db, project_id, 'build', 'index.html', html, version)
+                files = {'index.html': html}
+                if backend_mode == 'fastapi':
+                    files.update({BACKEND_PATH: python_source, REQUIREMENTS_PATH: requirements})
+            files, provenance = compile_with_appspec(project, files)
+            if source_format == 'multi-file':
+                await ensure_frontend_build(db_user, project_id, version, files)
+            for path, content in files.items():
+                save_artifact(db, project_id, 'build', path, content, version)
+            for path, content in provenance.items():
+                save_artifact(db, project_id, 'build', path, content, version)
             version_label = 'Refinement' if revise or stage == 'review' else f'Phase {phase}'
             db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',
                        (project_id, version, version_label, feedback or STAGE_LABELS[stage], backend_mode, source_format))
@@ -230,6 +276,30 @@ async def _advance(
 
 
 async def revise_document(
+    user_id: int, project_id: str, provider: dict | None, feedback: str,
+) -> None:
+    if not feature_enabled(FeatureFlag.DURABLE_JOBS_V1):
+        await _revise_document_legacy(user_id, project_id, provider, feedback)
+        return
+    with workspace_db(user_id) as db:
+        project = get_project(db, project_id)
+        if not project:
+            return
+        stage = project['stage']
+        input_data = {
+            'project_id': project_id,
+            'stage': stage,
+            'version': project['current_version'],
+            'source_format': project['source_format'],
+            'feedback': feedback,
+        }
+    await run_generation_job(
+        user_id, project_id, stage, 'revise-document', input_data,
+        lambda: _revise_document_legacy(user_id, project_id, provider, feedback),
+    )
+
+
+async def _revise_document_legacy(
     user_id: int, project_id: str, provider: dict | None, feedback: str,
 ) -> None:
     if project_id in _running:
@@ -286,6 +356,35 @@ async def _revise_document(
 
 
 async def migrate_architecture(
+    user_id: int, project_id: str, target: str, provider: dict | None, feedback: str = '',
+    deferred: bool = False,
+) -> None:
+    if target not in {'static', 'fastapi'}:
+        raise GenerationError('Choose either frontend-only or FastAPI architecture.')
+    if not feature_enabled(FeatureFlag.DURABLE_JOBS_V1):
+        await _migrate_architecture_legacy(user_id, project_id, target, provider, feedback, deferred)
+        return
+    with workspace_db(user_id) as db:
+        project = get_project(db, project_id)
+        if not project:
+            return
+        stage = project['stage']
+        input_data = {
+            'project_id': project_id,
+            'stage': stage,
+            'version': project['current_version'],
+            'backend_mode': project['backend_mode'],
+            'source_format': project['source_format'],
+            'target': target,
+            'feedback': feedback,
+        }
+    await run_generation_job(
+        user_id, project_id, stage, 'migrate', input_data,
+        lambda: _migrate_architecture_legacy(user_id, project_id, target, provider, feedback, deferred),
+    )
+
+
+async def _migrate_architecture_legacy(
     user_id: int, project_id: str, target: str, provider: dict | None, feedback: str = '',
     deferred: bool = False,
 ) -> None:
@@ -368,8 +467,6 @@ async def _migrate_architecture(
                 html, python_source, requirements = validate_application(
                     local_backend_html(name, brief, phase), local_backend_source(name),
                 )
-            save_artifact(db, project_id, 'build', BACKEND_PATH, python_source, next_version)
-            save_artifact(db, project_id, 'build', REQUIREMENTS_PATH, requirements, next_version)
         else:
             direction += (' Remove Forma.api and every server dependency. Preserve the product workflow with '
                           'browser-local state and a complete static HTML document.')
@@ -389,7 +486,16 @@ async def _migrate_architecture(
                     raise GenerationError('The frontend-only migration still contains backend calls. Please retry.')
             else:
                 html = application_html(name, brief, phase, direction)
-        save_artifact(db, project_id, 'build', 'index.html', html, next_version)
+        files = {'index.html': html}
+        if target == 'fastapi':
+            files.update({BACKEND_PATH: python_source, REQUIREMENTS_PATH: requirements})
+        spec_project = dict(project)
+        spec_project['backend_mode'] = target
+        files, provenance = compile_with_appspec(spec_project, files)
+        for path, content in files.items():
+            save_artifact(db, project_id, 'build', path, content, next_version)
+        for path, content in provenance.items():
+            save_artifact(db, project_id, 'build', path, content, next_version)
         label = 'FastAPI migration' if target == 'fastapi' else 'Frontend-only migration'
         db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',
                    (project_id, next_version, label, feedback or reason, target, project['source_format']))
@@ -408,9 +514,7 @@ async def _migrate_source_package(
         project = get_project(db, project_id)
         version = project['current_version']
         next_version = version + 1
-        current_files = {row['path']: row['content'] for row in db.execute(
-            'SELECT path,content FROM artifacts WHERE project_id=? AND version=?', (project_id, version),
-        )}
+        current_files = generation_source_files(db, project_id, version)
         direction = (f'Architecture migration to {target}. Preserve the current React design and interactions. '
                      f'User direction: {feedback or "None"}')
         if provider:
@@ -419,8 +523,13 @@ async def _migrate_source_package(
             )
         else:
             files = local_source_package(project['name'], project['brief'], max(1, project['phase_index']), target)
+        spec_project = dict(project)
+        spec_project['backend_mode'] = target
+        files, provenance = compile_with_appspec(spec_project, files)
         await ensure_frontend_build(user_id, project_id, next_version, files)
         for path, content in files.items():
+            save_artifact(db, project_id, 'build', path, content, next_version)
+        for path, content in provenance.items():
             save_artifact(db, project_id, 'build', path, content, next_version)
         label = 'FastAPI migration' if target == 'fastapi' else 'Frontend-only migration'
         db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',

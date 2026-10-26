@@ -7,6 +7,7 @@ from app.backend_engine import (
     default_requirements, local_backend_html, local_backend_source,
     recommend_backend, runtime_requirements, validate_application,
 )
+from app.config import ROOT as BACKEND_ROOT
 from app.config import Settings, settings
 from app.llm import GenerationError
 from app.main import app
@@ -51,7 +52,8 @@ def test_legacy_requirements_gain_email_support_once():
 
 
 def test_relative_data_directory_is_absolute_for_subprocesses():
-    assert Settings(data_dir='data').data_path.is_absolute()
+    assert Settings(data_dir='data').data_path == BACKEND_ROOT.parent / 'data'
+    assert Settings(data_dir=str(BACKEND_ROOT / 'data')).data_path == BACKEND_ROOT.parent / 'data'
 
 
 def test_fastapi_preview_crud_publish_and_cleanup():
