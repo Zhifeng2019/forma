@@ -19,6 +19,7 @@ import time
 from .backend_engine import runtime_requirements
 from .config import settings
 from .engine import validate_project_id
+from .frontend_builder import PackageBuildError, write_source_files
 
 
 class RuntimeLaunchError(RuntimeError):
@@ -59,11 +60,22 @@ class RuntimeManager:
         root = settings.data_path / 'projects' / project_id
         return root, root / '.venv', root / 'versions' / f'v{version}', root / 'work'
 
-    def _materialize(self, project_id: str, version: int, source: str, requirements: str) -> Path:
+    def _materialize(
+        self, project_id: str, version: int, source: str, requirements: str,
+        source_format: str, files: dict[str, str] | None,
+    ) -> Path:
         _root, _environment, source_dir, work = self._paths(project_id, version)
-        source_dir.mkdir(parents=True, exist_ok=True)
         work.mkdir(parents=True, exist_ok=True)
         (work / 'tmp').mkdir(exist_ok=True)
+        if source_format == 'multi-file':
+            if files is None:
+                raise RuntimeLaunchError('The multi-file backend package is unavailable')
+            try:
+                write_source_files(project_id, version, files)
+            except PackageBuildError as exc:
+                raise RuntimeLaunchError(str(exc)) from exc
+            return source_dir / 'backend'
+        source_dir.mkdir(parents=True, exist_ok=True)
         main = source_dir / 'main.py'
         dependencies = source_dir / 'requirements.txt'
         if main.exists() and main.read_text() != source:
@@ -79,6 +91,8 @@ class RuntimeManager:
         channel: str,
         source: str,
         requirements: str,
+        source_format: str = 'single-file',
+        files: dict[str, str] | None = None,
     ) -> ManagedRuntime:
         key = self._key(project_id, version, channel)
         existing = self._runtimes.get(key)
@@ -94,7 +108,7 @@ class RuntimeManager:
                     return existing
                 if existing:
                     await self._stop(key)
-                source_dir = self._materialize(project_id, version, source, requirements)
+                source_dir = self._materialize(project_id, version, source, requirements, source_format, files)
                 # A project has one active preview. Published versions have an
                 # independent lifecycle and are never interrupted by previewing history.
                 if channel == 'preview':
@@ -312,8 +326,10 @@ class RuntimeManager:
         query: str,
         body: bytes,
         content_type: str,
+        source_format: str = 'single-file',
+        files: dict[str, str] | None = None,
     ) -> httpx.Response:
-        runtime = await self.ensure(project_id, version, channel, source, requirements)
+        runtime = await self.ensure(project_id, version, channel, source, requirements, source_format, files)
         if path.startswith('/') or '..' in path.split('/'):
             raise RuntimeLaunchError('Invalid generated API path')
         target = f'http://127.0.0.1:{runtime.port}/api/{path}'
@@ -352,11 +368,14 @@ class RuntimeManager:
             'execution': 'isolated-process',
         }
 
-    async def restart(self, project_id: str, version: int, source: str, requirements: str) -> dict:
+    async def restart(
+        self, project_id: str, version: int, source: str, requirements: str,
+        source_format: str = 'single-file', files: dict[str, str] | None = None,
+    ) -> dict:
         key = self._key(project_id, version, 'preview')
         async with self._lock(project_id):
             await self._stop(key)
-        await self.ensure(project_id, version, 'preview', source, requirements)
+        await self.ensure(project_id, version, 'preview', source, requirements, source_format, files)
         return await self.status(project_id, version, check_health=True)
 
     async def stop_project(self, project_id: str, channel: str | None = None, keep_version: int | None = None) -> None:
@@ -449,6 +468,21 @@ async function api(path,options={{}}){{
   return data;
 }}
 window.Forma=Object.freeze({{api}});
+const nativeFetch=window.fetch.bind(window);
+window.fetch=async(input,init={{}})=>{{
+  try{{
+    const raw=input instanceof Request?input.url:String(input),url=new URL(raw,window.location.origin);
+    if(url.origin===window.location.origin&&url.pathname.startsWith('/api/')&&!url.pathname.startsWith('/api/projects/')){{
+      const headers=new Headers(init.headers||(input instanceof Request?input.headers:{{}}));
+      if(privatePreview){{const token=new URLSearchParams(window.location.search).get('access_token');if(token)headers.set('Authorization','Bearer '+token)}}
+      if(init.body!==undefined&&!(init.body instanceof FormData)&&!headers.has('Content-Type'))headers.set('Content-Type','application/json');
+      const target=base+url.pathname.slice(4)+url.search;
+      if(input instanceof Request){{const request=new Request(target,input);return nativeFetch(request,{{...init,headers}})}}
+      return nativeFetch(target,{{...init,headers}});
+    }}
+  }}catch(_){{}}
+  return nativeFetch(input,init);
+}};
 }})();</script>'''
 
 

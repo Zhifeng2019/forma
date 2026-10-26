@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 import httpx
 from .database import control_db, workspace_db, rows
 from .deps import current_user, admin_user, owned_project
@@ -10,7 +10,9 @@ from .security import hash_password, verify_password, create_token, encrypt_secr
 from .engine import add_message, add_event, generate_stage, migrate_architecture, revise_document, safe_selector
 from .llm import GenerationError
 from .backend_engine import BACKEND_PATH, REQUIREMENTS_PATH
+from .config import settings
 from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manager
+from .frontend_builder import PackageBuildError, deployment_archive, ensure_frontend_build, frontend_asset_path
 
 router = APIRouter(prefix='/api')
 _generation_jobs: dict[asyncio.Task, tuple[int, str]] = {}
@@ -202,7 +204,7 @@ def project_payload(user_id, project_id):
         result['backend_enabled'] = result['backend_mode'] == 'fastapi'
         result['messages'] = rows(db.execute('SELECT * FROM messages WHERE project_id=? ORDER BY id', (project_id,)))
         result['events'] = rows(db.execute('SELECT * FROM events WHERE project_id=? ORDER BY id DESC LIMIT 30', (project_id,)))
-        result['versions'] = rows(db.execute('SELECT id,version,label,note,backend_mode,created_at FROM versions WHERE project_id=? ORDER BY version DESC', (project_id,)))
+        result['versions'] = rows(db.execute('SELECT id,version,label,note,backend_mode,source_format,created_at FROM versions WHERE project_id=? ORDER BY version DESC', (project_id,)))
         artifacts = db.execute('''SELECT a.* FROM artifacts a JOIN (SELECT path,MAX(version) version FROM artifacts WHERE project_id=? GROUP BY path) latest
                                   ON a.path=latest.path AND a.version=latest.version WHERE a.project_id=? ORDER BY a.path''', (project_id, project_id))
         result['artifacts'] = rows(artifacts)
@@ -222,8 +224,8 @@ async def create_project(body: ProjectInput, user=Depends(current_user)):
     reason = 'Selected when this project was created.' if body.backend_mode != 'auto' else ''
     initial_status = 'working' if body.defer else 'ready'
     with workspace_db(user['id']) as db:
-        db.execute('INSERT INTO projects(id,name,brief,auto_mode,backend_mode,backend_reason,status) VALUES(?,?,?,?,?,?,?)',
-                   (project_id, body.name.strip(), body.brief.strip(), int(body.auto_mode), body.backend_mode, reason, initial_status))
+        db.execute('INSERT INTO projects(id,name,brief,auto_mode,backend_mode,backend_reason,source_format,status) VALUES(?,?,?,?,?,?,?,?)',
+                   (project_id, body.name.strip(), body.brief.strip(), int(body.auto_mode), body.backend_mode, reason, body.source_format, initial_status))
         add_message(db, project_id, 'user', body.brief.strip(), 'brief')
         add_message(db, project_id, 'agent', 'I’m shaping your idea into a focused product description. I’ll keep the scope clear and choose only the architecture it needs.', 'stage')
         add_event(db, project_id, 'Project created')
@@ -354,18 +356,31 @@ def version_backend_mode(user_id: int, project_id: str, version: int) -> str:
     raise HTTPException(404, 'Version not found')
 
 
-def runtime_artifacts(user_id: int, project_id: str, version: int) -> tuple[str, str]:
+def version_source_format(user_id: int, project_id: str, version: int) -> str:
+    with workspace_db(user_id) as db:
+        row = db.execute('SELECT source_format FROM versions WHERE project_id=? AND version=?',
+                         (project_id, version)).fetchone()
+        if row:
+            return row['source_format']
+        project = db.execute('SELECT source_format,current_version FROM projects WHERE id=?', (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(404, 'Project not found')
+        if project['current_version'] == version:
+            return project['source_format']
+    raise HTTPException(404, 'Version not found')
+
+
+def runtime_artifacts(user_id: int, project_id: str, version: int) -> tuple[str, str, str, dict[str, str]]:
     if version_backend_mode(user_id, project_id, version) != 'fastapi':
         raise HTTPException(409, 'This version is frontend only')
+    source_format = version_source_format(user_id, project_id, version)
     with workspace_db(user_id) as db:
-        artifacts = db.execute(
-            'SELECT path,content FROM artifacts WHERE project_id=? AND version=? AND path IN (?,?)',
-            (project_id, version, BACKEND_PATH, REQUIREMENTS_PATH),
-        ).fetchall()
+        artifacts = db.execute('SELECT path,content FROM artifacts WHERE project_id=? AND version=?',
+                               (project_id, version)).fetchall()
     contents = {artifact['path']: artifact['content'] for artifact in artifacts}
     if BACKEND_PATH not in contents or REQUIREMENTS_PATH not in contents:
         raise HTTPException(404, 'This version does not contain a FastAPI backend')
-    return contents[BACKEND_PATH], contents[REQUIREMENTS_PATH]
+    return contents[BACKEND_PATH], contents[REQUIREMENTS_PATH], source_format, contents
 
 
 def runtime_response(upstream: httpx.Response) -> Response:
@@ -378,7 +393,7 @@ def runtime_response(upstream: httpx.Response) -> Response:
 async def forward_runtime(
     request: Request, user_id: int, project_id: str, version: int, channel: str, path: str,
 ) -> Response:
-    source, requirements = runtime_artifacts(user_id, project_id, version)
+    source, requirements, source_format, files = runtime_artifacts(user_id, project_id, version)
     try:
         if int(request.headers.get('content-length', '0')) > 2_000_000:
             raise HTTPException(413, 'Application request body is limited to 2 MB')
@@ -391,6 +406,7 @@ async def forward_runtime(
         upstream = await runtime_manager.request(
             project_id, version, channel, source, requirements, request.method, path,
             request.url.query, body, request.headers.get('content-type', ''),
+            source_format=source_format, files=files,
         )
     except RuntimeLaunchError as exc:
         detail = ('The application backend is temporarily unavailable. Please try again shortly.'
@@ -414,9 +430,11 @@ async def restart_runtime(project_id: str, user=Depends(current_user)):
     project = owned_project(user['id'], project_id)
     if project['backend_mode'] != 'fastapi' or not project['current_version']:
         raise HTTPException(409, 'Build a FastAPI application before restarting its runtime')
-    source, requirements = runtime_artifacts(user['id'], project_id, project['current_version'])
+    source, requirements, source_format, files = runtime_artifacts(user['id'], project_id, project['current_version'])
     try:
-        result = await runtime_manager.restart(project_id, project['current_version'], source, requirements)
+        result = await runtime_manager.restart(
+            project_id, project['current_version'], source, requirements, source_format, files,
+        )
     except RuntimeLaunchError as exc:
         with workspace_db(user['id']) as db:
             add_event(db, project_id, f'Backend restart failed: {exc}', 'error')
@@ -442,7 +460,8 @@ async def publish_project(project_id: str, body: PublishInput, user=Depends(curr
     if version_backend_mode(user['id'], project_id, version) == 'fastapi':
         runtime_artifacts(user['id'], project_id, version)
     with workspace_db(user['id']) as db:
-        if not db.execute('SELECT 1 FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, 'index.html', version)).fetchone():
+        artifact_path = 'frontend/index.html' if version_source_format(user['id'], project_id, version) == 'multi-file' else 'index.html'
+        if not db.execute('SELECT 1 FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, artifact_path, version)).fetchone():
             raise HTTPException(404, 'Version not found')
         db.execute('UPDATE projects SET published_version=?,stage=?,stage_index=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', (version, 'deploy', 5, project_id))
         add_event(db, project_id, f'Version {version} published', 'success')
@@ -461,13 +480,73 @@ async def unpublish_project(project_id: str, user=Depends(current_user)):
     return {'ok': True}
 
 
+def version_artifacts(user_id: int, project_id: str, version: int) -> dict[str, str]:
+    with workspace_db(user_id) as db:
+        artifacts = db.execute('SELECT path,content FROM artifacts WHERE project_id=? AND version=?',
+                               (project_id, version)).fetchall()
+    if not artifacts:
+        raise HTTPException(404, 'Version not found')
+    return {artifact['path']: artifact['content'] for artifact in artifacts}
+
+
+@router.get('/projects/{project_id}/package')
+async def download_package(project_id: str, access_token: str, version: int | None = None):
+    from .security import decode_token
+    try:
+        user_id = decode_token(access_token)
+    except Exception as exc:
+        raise HTTPException(401, 'A valid download session is required') from exc
+    project = owned_project(user_id, project_id)
+    version = version or project['current_version']
+    if version_source_format(user_id, project_id, version) != 'multi-file':
+        raise HTTPException(409, 'Deployment archives are available for multi-file projects')
+    try:
+        files = version_artifacts(user_id, project_id, version)
+        await ensure_frontend_build(user_id, project_id, version, files)
+        content = deployment_archive(
+            user_id, project_id, version, files, version_backend_mode(user_id, project_id, version),
+        )
+    except PackageBuildError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return Response(content=content, media_type='application/zip', headers={
+        'Content-Disposition': f'attachment; filename="forma-{project_id[:8]}-v{version}.zip"',
+        'Cache-Control': 'no-store',
+    })
+
+
+@router.get('/projects/{project_id}/assets/{path:path}')
+async def preview_asset(project_id: str, path: str, request: Request, version: int | None = None, access_token: str | None = None):
+    from .security import decode_token
+    token = access_token or request.cookies.get('forma_preview')
+    try:
+        user_id = decode_token(token or '')
+    except Exception as exc:
+        raise HTTPException(401, 'A valid preview session is required') from exc
+    project = owned_project(user_id, project_id)
+    version = version or int(request.cookies.get('forma_preview_version') or project['current_version'])
+    if version_source_format(user_id, project_id, version) != 'multi-file':
+        raise HTTPException(404, 'This version has no built frontend assets')
+    try:
+        await ensure_frontend_build(user_id, project_id, version, version_artifacts(user_id, project_id, version))
+        return FileResponse(frontend_asset_path(project_id, version, path))
+    except PackageBuildError as exc:
+        raise HTTPException(404 if 'does not exist' in str(exc) else 503, str(exc)) from exc
+
+
 @router.get('/projects/{project_id}/versions/{version}')
-def get_version(project_id: str, version: int, user=Depends(current_user)):
+async def get_version(project_id: str, version: int, user=Depends(current_user)):
     owned_project(user['id'], project_id)
     with workspace_db(user['id']) as db:
         artifact = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, 'index.html', version)).fetchone()
-    if not artifact:
+    if not artifact and version_source_format(user['id'], project_id, version) != 'multi-file':
         raise HTTPException(404, 'Version not found')
+    if version_source_format(user['id'], project_id, version) == 'multi-file':
+        try:
+            return {'html': await ensure_frontend_build(
+                user['id'], project_id, version, version_artifacts(user['id'], project_id, version),
+            )}
+        except PackageBuildError as exc:
+            raise HTTPException(503, str(exc)) from exc
     return {'html': artifact['content']}
 
 
@@ -480,7 +559,7 @@ document.addEventListener('click',e=>{if(!picking)return;e.preventDefault();e.st
 
 
 @router.get('/projects/{project_id}/preview', response_class=HTMLResponse)
-def preview_project(project_id: str, access_token: str, version: int | None = None):
+async def preview_project(project_id: str, access_token: str, version: int | None = None):
     from .security import decode_token
     try:
         user_id = decode_token(access_token)
@@ -490,10 +569,24 @@ def preview_project(project_id: str, access_token: str, version: int | None = No
     version = version or project['current_version']
     with workspace_db(user_id) as db:
         artifact = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, 'index.html', version)).fetchone()
-    if not artifact:
+    source_format = version_source_format(user_id, project_id, version)
+    if not artifact and source_format != 'multi-file':
         raise HTTPException(404, 'No application preview is available yet')
-    html = artifact['content']
+    if source_format == 'multi-file':
+        try:
+            html = await ensure_frontend_build(
+                user_id, project_id, version, version_artifacts(user_id, project_id, version),
+            )
+        except PackageBuildError as exc:
+            raise HTTPException(503, str(exc)) from exc
+    else:
+        html = artifact['content']
     if version_backend_mode(user_id, project_id, version) == 'fastapi':
         html = inject_runtime_bootstrap(html, project_id, version, published=False)
     html = html.replace('</body>', PICKER_SCRIPT + '</body>')
-    return HTMLResponse(html, headers={'Cache-Control': 'no-store', 'Content-Security-Policy': "frame-ancestors 'self' http://localhost:5173"})
+    response = HTMLResponse(html, headers={'Cache-Control': 'no-store', 'Content-Security-Policy': "frame-ancestors 'self' http://localhost:5173"})
+    response.set_cookie('forma_preview', access_token, max_age=settings.access_token_days * 86400,
+                        path=f'/api/projects/{project_id}', httponly=True, samesite='lax')
+    response.set_cookie('forma_preview_version', str(version), max_age=settings.access_token_days * 86400,
+                        path=f'/api/projects/{project_id}', httponly=True, samesite='lax')
+    return response

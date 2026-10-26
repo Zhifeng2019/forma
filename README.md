@@ -12,6 +12,9 @@ Forma is an AI-native application builder built around a guided product-developm
 - Automatic or explicit architecture selection: frontend-only HTML or HTML plus a dedicated FastAPI backend.
 - Bidirectional architecture migration for existing projects, with immediate migration progress, automatic preview refresh, version-specific architecture, preserved phase state, and unchanged published releases until republishing.
 - Three implementation phases with working previews and version history.
+- Multi-file React project packages with component source, a Vite production build, and modular FastAPI backends.
+- A Source tab for reviewing current-version files and downloading a deployment ZIP containing `frontend/`, `frontend/dist/`, and `backend/`.
+- Shared per-user Node environments and expanded reviewed Python dependencies, all installed from pinned versions and built-in package validation.
 - Versioned `main.py` and pinned `requirements.txt` artifacts for backend-enabled applications.
 - Per-app Python environments with packages physically installed from the Aliyun PyPI mirror, application-local SQLite persistence, health checks, runtime logs, and independent preview/public processes.
 - A Server panel for backend health, source review, actionable error summaries with expandable technical details, and preview restart.
@@ -44,6 +47,20 @@ cd backend
 
 The initial local administrator is `admin@forma.local` with password `admin123`. Change this account before exposing the service publicly. All data is development-local by default under `backend/data/`.
 
+## Generated project packages
+
+New projects default to **Project package**; **Single file** remains available for legacy generation. A multi-file version is laid out as:
+
+```text
+versions/vN/
+  frontend/        # React source, package.json, Vite config, and built dist/
+  backend/         # FastAPI entrypoint, app modules, requirements.txt
+```
+
+The agent validates source files and reviewed dependencies, runs `vite build`, and marks the version ready only after `frontend/dist/index.html` exists. One shared Node environment per user supplies locked React, React DOM, Lucide, Vite, and React-plugin packages. Forma generates `backend/requirements.txt` from the reviewed `python_dependencies` list rather than requiring it from the model. Python environments remain app-specific and support the base FastAPI stack plus reviewed `httpx`, `PyJWT`, `cryptography`, `pydantic-settings`, `python-multipart`, and `SQLAlchemy` packages.
+
+The Source tab displays current-version files. Deployment downloads include frontend source, production `frontend/dist/`, and backend modules, excluding dependency folders, caches, and temporary files. Preview and public hosting serve the built output and its assets. Both `Forma.api` and native same-origin `/api/...` fetch calls are routed through the runtime bridge. Invalid model packages receive one bounded semantic regeneration.
+
 ## Generated FastAPI runtime
 
 Backend-enabled applications live under `backend/data/projects/<application-id>/` with one virtual environment, immutable source directories for each version, and an application-local SQLite working directory. Preview and published processes start on demand and have independent lifecycles; their application database is shared across restarts and versions.
@@ -69,12 +86,15 @@ cd frontend && npx playwright test
 - `backend/app/api.py` — authentication, administration, project workflow, private runtime proxy, preview, and publishing API.
 - `backend/app/engine.py` — stage orchestration, architecture decisions, artifacts, messages, and versions.
 - `backend/app/backend_engine.py` — FastAPI generation contract, source validation, and deterministic local backend.
+- `backend/app/source_packages.py` — multi-file React/FastAPI generation, local packages, and file/dependency validation.
+- `backend/app/frontend_builder.py` — shared Node environments, Vite production builds, assets, and deployment archives.
 - `backend/app/runtime.py` — per-app environments, loopback processes, health checks, proxying, logs, and cleanup.
 - `backend/app/runtime_launcher.py` — trusted child-process launcher and OS resource limits.
 - `backend/app/llm.py` — structured OpenAI-compatible model calls and output-truncation repair.
 - `backend/app/local_engine.py` — offline product documents and frontend-only generation.
-- `backend/app/database.py` — control and per-user SQLite schemas plus architecture migrations.
-- `frontend/src/pages/Dashboard.tsx` — project dashboard and architecture selection.
+- `backend/app/database.py` — control and per-user SQLite schemas plus architecture/source-format migrations.
+- `frontend/src/pages/Dashboard.tsx` — project dashboard and architecture/source-format selection.
 - `frontend/src/pages/Builder.tsx` — collaborative product studio.
+- `frontend/src/components/SourcePanel.tsx` — current-version source browser and deployment download.
 - `frontend/src/components/BackendPanel.tsx` — FastAPI health, logs, source, and restart controls.
 - `frontend/src/pages/AdminPage.tsx` — provider and member administration.

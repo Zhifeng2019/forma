@@ -1,7 +1,7 @@
 # Forma Studio — AI-Native Application Builder
 
-**Document status:** Updated to reflect the implemented architecture-migration release
-**Current release:** Forma Studio v1.2
+**Document status:** Updated to reflect the implemented multi-file package release
+**Current release:** Forma Studio v1.3
 **Product name:** *Forma* comes from the Latin word for form, shape, or structure. It represents turning an unstructured idea into a working product.
 
 ## 1. Product overview
@@ -20,13 +20,23 @@ The product is built around a visible development cycle rather than a single pro
 - Support multiple production LLM providers through administrator configuration.
 - Isolate each user’s projects and artifacts in a dedicated SQLite workspace.
 
-### v1.2 scope
+### v1.3 scope
 
-Forma generates and hosts portable, single-page HTML applications with embedded CSS and JavaScript. A project can remain frontend-only or include a generated FastAPI backend with one `main.py`, a pinned `requirements.txt`, and an application-local SQLite workspace. Both architectures follow the same six-stage workflow.
+New projects can use a multi-file React and FastAPI source package or the legacy single-file format. Project package is the default in the creation UI; Single file remains available and existing versions keep their original behavior. Both formats support frontend-only and FastAPI architectures and preserve the same six-stage workflow.
 
-Existing projects can migrate in either direction as a new version without advancing the current phase. Architecture is stored on every version, so historical previews and published releases retain their original behavior until explicit republication. Migration uses the selected model provider or Forma Local.
+Each multi-file version has this deployment layout:
 
-The initial backend runtime supports the reviewed FastAPI/Pydantic/Uvicorn/email-validator stack and an allowlist of Python standard-library imports. It is a local process-isolation runtime, not a hardened multi-tenant security sandbox. General multi-file projects, arbitrary dependencies, production container isolation, and managed end-user authentication remain future work.
+```text
+versions/vN/
+  frontend/        # React source, package.json, Vite config, and built dist/
+  backend/         # FastAPI entrypoint, app package modules, requirements.txt
+```
+
+The agent validates source files and reviewed dependencies, runs the production Vite build, and only then marks a version ready. Previews serve built assets, publishing serves the same production output, and deployment ZIP downloads contain source plus `frontend/dist/` and `backend/` without dependency folders or caches.
+
+Existing projects can migrate architecture in either direction as a new version without advancing the current phase. Architecture and source format are stored on every version, so historical previews and published releases retain their original behavior until explicit republication.
+
+Reviewed Python dependencies include FastAPI, Pydantic, Uvicorn, email-validator, httpx, PyJWT, cryptography, pydantic-settings, python-multipart, and SQLAlchemy. Reviewed npm dependencies use the studio’s locked React, React DOM, Lucide, Vite, and React-plugin versions. Arbitrary dependencies, production container isolation, and managed end-user authentication remain future work. The runtime is process-isolated, not a hardened multi-tenant security sandbox.
 
 ## 2. Target users
 
@@ -60,12 +70,21 @@ The initial backend runtime supports the reviewed FastAPI/Pydantic/Uvicorn/email
 - Each backend-enabled application has its own Python virtual environment and directory under `backend/data/projects/<application-id>/`.
 - Each environment installs pinned dependencies into its own `site-packages` using its own `.venv/bin/python -m pip` and the Aliyun mirror `https://mirrors.aliyun.com/pypi/simple/` (configurable with `RUNTIME_PIP_INDEX_URL`). Studio and machine site-packages are not inherited.
 - Startup verifies package versions and physical import locations inside the application environment. Legacy shared-package links are removed and replaced with local installations before the backend can start. Older artifacts missing support packages, including `email-validator` for Pydantic `EmailStr`, are augmented during installation without rewriting the artifacts.
-- Every build version has immutable `versions/v<N>/main.py` and `requirements.txt` source files.
+- Single-file backends keep immutable `versions/v<N>/main.py` and `requirements.txt`. Multi-file backends use `versions/v<N>/backend/main.py` plus the generated `backend/app/` package modules.
 - Preview and published versions run independently on loopback and start on demand. Switching preview versions replaces only that project’s preview process.
 - Startup requires a successful `/api/health` check. Requests have timeouts and a 2 MB body limit; runtime logs are available only to the project owner.
 - Unpublishing stops the public process. Deleting a project stops its processes and removes its generated runtime directory.
 - Runtime capacity is bounded, with idle preview reclamation when capacity is needed. File-size, descriptor, concurrency, and supported OS memory limits are applied; macOS address-space limits are best-effort and may be unavailable.
 - An application-local `app.db` persists across process restarts and versions. Preview and published processes for the same application share this database.
+
+### Multi-file package build and deployment
+
+- Every multi-file version stores frontend and backend side-by-side. Frontend source, `package.json`, and Vite config live in `versions/v<N>/frontend/`; the FastAPI entrypoint and `backend/app/` modules live in `versions/v<N>/backend/`.
+- One shared Node environment per user installs the studio’s locked npm dependencies from `RUNTIME_NPM_REGISTRY` (default `https://registry.npmmirror.com`). Generated frontends link to that environment only during builds; it is never included in deployment archives.
+- The agent runs `vite build` during generation and requires `frontend/dist/index.html` before marking the version ready. Source and build hashes prevent unnecessary rebuilds for immutable versions.
+- Private previews serve built HTML and version-scoped asset cookies, including historical versions and CSS dependencies. Public hosting serves the selected published build and its assets.
+- The Source tab exposes current-version files and a deployment ZIP. Archives include React source, production `frontend/dist/`, and the backend package when applicable, while excluding `node_modules`, npm caches, temporary files, and bytecode.
+- Multi-file model output receives one bounded semantic regeneration when required files, imports, or API contracts fail validation. Empty Python modules such as `__init__.py` are valid.
 
 ### Data isolation
 
@@ -196,8 +215,9 @@ Each user selects an available provider in the Configuration page. If no provide
 - Product, design, and planning calls return structured JSON containing Markdown. Discovery also requests `backend_required` and `backend_reason` when architecture is automatic.
 - Frontend-only application calls return structured JSON containing complete HTML.
 - FastAPI application calls return complete HTML and Python source in one structured result so the UI and API contract evolve together.
-- Frontend output must contain a complete `<html>` document. Backend output must parse as Python, define `app = FastAPI(...)`, expose `/api/health`, and use the `Forma.api` frontend bridge.
-- Generated backend imports are allowlisted. The initial third-party stack is FastAPI, Pydantic, Uvicorn, and email-validator for Pydantic `EmailStr`; dependency pins come from the studio’s verified versions rather than arbitrary model-selected versions.
+- Single-file frontend output must contain a complete `<html>` document. Backend output must parse as Python, define `app = FastAPI(...)`, expose `/api/health`, and use either `Forma.api` or same-origin `/api/...` fetch calls handled by the runtime bridge.
+- Multi-file output uses a `files` object with required React and backend paths plus `python_dependencies`. The studio supplies reviewed `package.json` and Vite config, validates every path and module, and requires a production build before saving the ready version. `backend/requirements.txt` is generated by Forma from the reviewed list and is not required from the model. Optional-chaining and native-fetch adapters are supported by the same runtime bridge.
+- Generated backend imports are allowlisted. Base packages are FastAPI, Pydantic, Uvicorn, and email-validator; reviewed optional packages are httpx, PyJWT, cryptography, pydantic-settings, python-multipart, and SQLAlchemy. JavaScript application imports are limited to React, React DOM, and Lucide. All dependency pins come from studio lockfiles or verified versions rather than arbitrary model-selected versions.
 - The explicit output-token budget is **32,768 tokens** for each structured call.
 - DeepSeek deterministic coding calls disable reasoning where supported.
 - Moonshot Kimi K3 calls use low reasoning effort.
@@ -276,6 +296,9 @@ The optional-backend release is accepted when:
 - Automatic architecture selection chooses a backend for server-dependent briefs and preserves a frontend-only path for browser-only products.
 - Early-stage feedback modifies the corresponding document.
 - Three implementation phases create working application versions.
+- Multi-file versions build React source into `frontend/dist/` before becoming ready, serve hashed assets in preview and publishing, and run the modular FastAPI backend successfully.
+- Deployment downloads contain frontend source, production output, and backend modules without dependency folders or caches; reviewed optional Python and npm dependencies pass validation.
+- Real-provider multi-file generation produces a valid React package, production build, healthy backend, and deployable archive.
 - Existing projects migrate in both directions without advancing the phase, and each historical version retains its correct architecture.
 - A published static version remains static after a FastAPI migration; a published FastAPI version remains operational after migrating the working version to static until republication.
 - Deferred creation and autopilot refresh the workspace through the final preview without a manual page reload.
@@ -298,11 +321,9 @@ The optional-backend release is accepted when:
 
 ## 10. Planned next iterations
 
-The following capabilities are not part of the v1.2 runtime:
+The following capabilities are not part of the v1.3 runtime:
 
 - Hardened container sandboxing with enforced CPU, memory, network, and syscall policies for untrusted multi-tenant execution.
-- Generated multi-file frontend projects and backend source packages, plus broader reviewed dependency support.
-- One shared Node dependency environment per user for generated multi-file frontends.
 - Managed product-level authentication, authorization, storage, and separate preview/published application databases.
 - Specialist-agent delegation for parallel frontend, backend, and verification work.
 - Streaming model output and resumable background generation jobs.

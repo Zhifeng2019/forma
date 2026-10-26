@@ -23,6 +23,7 @@ export function Dashboard({ user, onUser }: { user: User; onUser: (user: User | 
   const [brief, setBrief] = useState('')
   const [auto, setAuto] = useState(false)
   const [backend, setBackend] = useState<BackendMode>('auto')
+  const [sourceFormat, setSourceFormat] = useState<Project['source_format']>('multi-file')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const navigate = useNavigate()
@@ -33,7 +34,7 @@ export function Dashboard({ user, onUser }: { user: User; onUser: (user: User | 
   }, [])
   const createProject = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError('')
-    try { const project = await api<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, brief, auto_mode: auto, backend_mode: backend, defer: true }) }); navigate(`/projects/${project.id}`) }
+    try { const project = await api<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, brief, auto_mode: auto, backend_mode: backend, source_format: sourceFormat, defer: true }) }); navigate(`/projects/${project.id}`) }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setBusy(false) }
   }
   const choose = (example: typeof examples[0]) => { setName(example.title); setBrief(example.text); setCreate(true) }
@@ -58,6 +59,10 @@ export function Dashboard({ user, onUser }: { user: User; onUser: (user: User | 
         <label className={backend === 'auto' ? 'selected' : ''}><input type="radio" name="backend" value="auto" checked={backend === 'auto'} onChange={() => setBackend('auto')} /><Sparkles size={18} /><strong>Let Forma decide</strong><small>Recommended · Choose from the product brief</small>{backend === 'auto' && <Check className="architecture-check" size={13} />}</label>
         <label className={backend === 'static' ? 'selected' : ''}><input type="radio" name="backend" value="static" checked={backend === 'static'} onChange={() => setBackend('static')} /><Code2 size={18} /><strong>Frontend only</strong><small>Portable HTML with browser-side state</small>{backend === 'static' && <Check className="architecture-check" size={13} />}</label>
         <label className={backend === 'fastapi' ? 'selected' : ''}><input type="radio" name="backend" value="fastapi" checked={backend === 'fastapi'} onChange={() => setBackend('fastapi')} /><Server size={18} /><strong>FastAPI backend</strong><small>A dedicated Python API and runtime</small>{backend === 'fastapi' && <Check className="architecture-check" size={13} />}</label>
+      </div></fieldset>
+      <fieldset className="architecture-picker" disabled={busy}><legend>Project format</legend><p>Choose a deployable source package or the original single-file format.</p><div className="source-format-options">
+        <label className={sourceFormat === 'multi-file' ? 'selected' : ''}><input type="radio" name="source_format" value="multi-file" checked={sourceFormat === 'multi-file'} onChange={() => setSourceFormat('multi-file')} /><strong>Project package</strong><small>Multi-file React, production build, and deployment download</small></label>
+        <label className={sourceFormat === 'single-file' ? 'selected' : ''}><input type="radio" name="source_format" value="single-file" checked={sourceFormat === 'single-file'} onChange={() => setSourceFormat('single-file')} /><strong>Single file</strong><small>Portable HTML with an optional FastAPI module</small></label>
       </div></fieldset>
       <label className="toggle-row"><span><strong>Autopilot mode</strong><small>Move through stages without approval gates</small></span><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /><i /></label>
       {error && <div className="form-error">{error}</div>}

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS projects (
  stage TEXT NOT NULL DEFAULT 'discovery', stage_index INTEGER NOT NULL DEFAULT 0,
  phase_index INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'ready',
  auto_mode INTEGER NOT NULL DEFAULT 0, backend_mode TEXT NOT NULL DEFAULT 'auto',
- backend_reason TEXT NOT NULL DEFAULT '', published_version INTEGER,
+ backend_reason TEXT NOT NULL DEFAULT '', source_format TEXT NOT NULL DEFAULT 'single-file',
+ published_version INTEGER,
  current_version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE TABLE IF NOT EXISTS versions (
  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, version INTEGER NOT NULL,
  label TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', backend_mode TEXT NOT NULL DEFAULT 'static',
+ source_format TEXT NOT NULL DEFAULT 'single-file',
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(project_id, version)
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -103,11 +105,17 @@ def workspace_for(user_id: int):
             db.execute("ALTER TABLE projects ADD COLUMN backend_mode TEXT NOT NULL DEFAULT 'static'")
         if 'backend_reason' not in columns:
             db.execute("ALTER TABLE projects ADD COLUMN backend_reason TEXT NOT NULL DEFAULT ''")
+        if 'source_format' not in columns:
+            db.execute("ALTER TABLE projects ADD COLUMN source_format TEXT NOT NULL DEFAULT 'single-file'")
         version_columns = {row['name'] for row in db.execute('PRAGMA table_info(versions)')}
         if 'backend_mode' not in version_columns:
             db.execute("ALTER TABLE versions ADD COLUMN backend_mode TEXT NOT NULL DEFAULT 'static'")
             db.execute('''UPDATE versions SET backend_mode=(
                           SELECT projects.backend_mode FROM projects WHERE projects.id=versions.project_id)''')
+        if 'source_format' not in version_columns:
+            db.execute("ALTER TABLE versions ADD COLUMN source_format TEXT NOT NULL DEFAULT 'single-file'")
+            db.execute('''UPDATE versions SET source_format=(
+                          SELECT projects.source_format FROM projects WHERE projects.id=versions.project_id)''')
 
 
 def rows(items):

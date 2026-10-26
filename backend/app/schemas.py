@@ -32,6 +32,7 @@ class ProjectInput(BaseModel):
     brief: str = Field(min_length=12, max_length=12000)
     auto_mode: bool = False
     backend_mode: Literal['auto', 'static', 'fastapi'] = 'auto'
+    source_format: Literal['single-file', 'multi-file'] = 'single-file'
     defer: bool = False
 
 

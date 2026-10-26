@@ -13,9 +13,10 @@ REQUIREMENTS_PATH = 'backend/requirements.txt'
 ALLOWED_IMPORTS = {
     'abc', 'asyncio', 'base64', 'bisect', 'collections', 'contextlib', 'csv',
     'dataclasses', 'datetime', 'decimal', 'email_validator', 'enum', 'fastapi', 'functools', 'hashlib',
-    'heapq', 'hmac', 'io', 'itertools', 'json', 'math', 'pydantic', 'random',
-    're', 'secrets', 'sqlite3', 'statistics', 'string', 'textwrap', 'time',
-    'typing', 'uuid',
+    'heapq', 'hmac', 'httpx', 'io', 'itertools', 'json', 'jwt', 'math', 'multipart',
+    'pydantic', 'pydantic_settings', 'random', 're', 'secrets', 'sqlalchemy',
+    'sqlite3', 'statistics', 'string', 'textwrap', 'time', 'typing', 'uuid',
+    'cryptography',
 }
 BLOCKED_CALLS = {
     '__import__', 'breakpoint', 'compile', 'eval', 'exec', 'getattr', 'globals',
@@ -37,6 +38,33 @@ def default_requirements() -> str:
         f'{package}=={package_version(package)}'
         for package in ('fastapi', 'uvicorn', 'pydantic', 'email-validator')
     ) + '\n'
+
+
+REVIEWED_PACKAGES = {
+    'fastapi': 'fastapi', 'uvicorn': 'uvicorn', 'pydantic': 'pydantic',
+    'email-validator': 'email-validator', 'httpx': 'httpx', 'pyjwt': 'PyJWT',
+    'cryptography': 'cryptography', 'pydantic-settings': 'pydantic-settings',
+    'python-multipart': 'python-multipart', 'sqlalchemy': 'SQLAlchemy',
+}
+
+
+def reviewed_requirements(requested: list[str] | str | None = None) -> str:
+    """Return pinned base and explicitly reviewed optional dependencies."""
+    if isinstance(requested, str):
+        requested = requested.splitlines()
+    if requested is None:
+        requested = []
+    if not isinstance(requested, list) or any(not isinstance(item, str) for item in requested):
+        raise GenerationError('python_dependencies must be a list of reviewed package names.')
+    packages = ['fastapi', 'uvicorn', 'pydantic', 'email-validator']
+    for item in requested:
+        name = re.sub(r'[-_.]+', '-', item.split('==', 1)[0].strip()).lower()
+        if name not in REVIEWED_PACKAGES:
+            raise GenerationError(f'Unsupported Python dependency: {item}. Reviewed packages: {", ".join(REVIEWED_PACKAGES)}.')
+        package = REVIEWED_PACKAGES[name]
+        if package not in packages:
+            packages.append(package)
+    return '\n'.join(f'{package}=={package_version(package)}' for package in packages) + '\n'
 
 
 def runtime_requirements(requirements: str) -> str:
@@ -81,12 +109,21 @@ Requirements:
 - The backend is ONE complete Python module named main.py. Define `app = FastAPI(...)` and a GET `/api/health` endpoint returning {{"status":"ok"}}.
 - Implement the product's real server-side workflow beneath `/api`, with validation, useful errors, and sensible initial data. Use Python's standard-library sqlite3 with database filename `app.db` when persistence is needed; do not use browser localStorage for server-owned data.
 - The runtime injects `window.Forma.api(path, options)` before application scripts. EVERY backend request MUST use `Forma.api('/resource', options)`, without an `/api` prefix. Example: `const items = await Forma.api('/items');` and `await Forma.api('/items', {{method:'POST', body:JSON.stringify({{title}})}})`. Do not call fetch directly for the application API.
-- Only fastapi, pydantic, uvicorn, and email-validator (for Pydantic EmailStr) third-party packages are available. Do not import os, sys, subprocess, socket, shutil, pathlib, requests, httpx, urllib, ctypes, or importlib. Do not read host files or environment variables.
+- Base packages: fastapi, pydantic, uvicorn, and email-validator. Reviewed optional packages: httpx, PyJWT, cryptography, pydantic-settings, python-multipart, SQLAlchemy. Include optional packages in requirements only when used. Do not import os, sys, subprocess, socket, shutil, pathlib, requests, urllib, ctypes, or importlib. Do not read host files or environment variables.
 - Keep the backend focused and below 500 lines. Preserve working API contracts when refining an existing version.
 - Phase 1 must already have a working preview and health endpoint. Phase 2 completes the primary server-backed workflow. Phase 3 improves reliability and release polish.'''
 
 
-def validate_application(html: str, python_source: str) -> tuple[str, str, str]:
+def has_forma_api(script: str) -> bool:
+    """Accept Forma.api or a native fetch handled by the runtime bridge."""
+    return bool(re.search(r'(?:window\.)?Forma(?:\?\.|\.)api(?:\?\.)?\s*\(', script)
+                or re.search(r'Forma\[["\']api["\']\]\s*\(', script)
+                or re.search(r'\bfetch\s*\(', script))
+
+
+def validate_application(
+    html: str, python_source: str, python_dependencies: list[str] | str | None = None,
+) -> tuple[str, str, str]:
     if not isinstance(html, str) or not isinstance(python_source, str):
         raise GenerationError('The model must return HTML and Python source as strings.')
     html = html.strip()
@@ -95,7 +132,7 @@ def validate_application(html: str, python_source: str) -> tuple[str, str, str]:
         raise GenerationError('The generated frontend was not a complete HTML document.')
     if len(html) > 250_000 or len(python_source) > 80_000:
         raise GenerationError('The generated application is too large. Split this phase into a smaller change.')
-    if not re.search(r'(?:window\.)?Forma\.api\s*\(', html):
+    if not has_forma_api(html):
         raise GenerationError('The generated frontend is not connected through Forma.api. Retry this phase.')
     try:
         tree = ast.parse(python_source, filename='main.py')
@@ -116,7 +153,7 @@ def validate_application(html: str, python_source: str) -> tuple[str, str, str]:
     if not re.search(r'["\']/api/health["\']', python_source):
         raise GenerationError('The generated backend is missing its /api/health endpoint.')
     compile(python_source, 'main.py', 'exec')
-    return html, python_source, default_requirements()
+    return html, python_source, reviewed_requirements(python_dependencies)
 
 
 def _validate_import(module: str) -> None:

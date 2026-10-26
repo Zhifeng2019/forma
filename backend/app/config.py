@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     access_token_days: int = 14
     runtime_python: str = ''
     runtime_pip_index_url: str = 'https://mirrors.aliyun.com/pypi/simple/'
+    runtime_npm_registry: str = 'https://registry.npmmirror.com'
+    runtime_build_timeout: int = 240
     runtime_install_timeout: int = 240
     runtime_start_timeout: int = 25
     runtime_request_timeout: int = 20

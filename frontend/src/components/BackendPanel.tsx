@@ -26,7 +26,7 @@ export function BackendPanel({ project, onChanged }: { project: Project; onChang
       setError(reason instanceof Error ? reason.message : String(reason)); await load()
     } finally { setBusy(false) }
   }
-  const source = project.artifacts.find(artifact => artifact.path === sourcePath)
+  const source = project.artifacts.find(artifact => artifact.path === sourcePath && artifact.version === project.current_version)
   const healthy = state?.status === 'running' && state.healthy
   return <div className="backend-view">
     <section className="runtime-overview">

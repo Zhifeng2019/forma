@@ -8,6 +8,8 @@ from .backend_engine import (
     BACKEND_PATH, REQUIREMENTS_PATH, application_prompt,
     local_backend_html, local_backend_source, recommend_backend, validate_application,
 )
+from .frontend_builder import ensure_frontend_build
+from .source_packages import local_source_package, package_prompt, validate_source_package
 
 STAGES = ['discovery', 'design', 'plan', 'build', 'review', 'deploy']
 STAGE_LABELS = {
@@ -46,6 +48,30 @@ def provider_for_user(control, user_id):
         return None
     row = control.execute('SELECT * FROM providers WHERE id=? AND enabled=1', (pref['provider_id'],)).fetchone()
     return dict(row) if row else None
+
+
+async def complete_package(
+    provider: dict, name: str, brief: str, phase: int, feedback: str,
+    backend_mode: str, current_files: dict[str, str],
+) -> dict[str, str]:
+    system = 'You are an expert React and FastAPI engineer. Generate a coherent multi-file project package.'
+    result = await complete(provider, system, package_prompt(name, brief, phase, feedback, backend_mode, current_files))
+    try:
+        return validate_source_package(result.get('files', {}), backend_mode, result.get('python_dependencies'))
+    except GenerationError as exc:
+        adapter = str(result.get('files', {}).get('frontend/src/api.js', ''))[:4000]
+        repair = package_prompt(name, brief, phase, feedback, backend_mode, current_files) + (
+            f'\nThe previous response failed package validation: {exc}\n'
+            f'Problematic frontend/src/api.js:\n{adapter or "Not supplied"}\n'
+            'Regenerate the complete corrected package. Follow every required path and API contract exactly.'
+        )
+        result = await complete(provider, system, repair)
+        try:
+            return validate_source_package(result.get('files', {}), backend_mode, result.get('python_dependencies'))
+        except GenerationError as second_error:
+            excerpt = str(result.get('files', {}).get('frontend/src/api.js', ''))[:500]
+            available = ', '.join(result.get('files', {}).keys())[:1800]
+            raise GenerationError(f'{second_error} Available files: {available}. Offending frontend/src/api.js excerpt: {excerpt}') from second_error
 
 
 async def generate_stage(
@@ -134,7 +160,20 @@ async def _advance(
             phase = max(1, project['phase_index']) if revise else min(3, project['phase_index'] + 1)
             version += 1
             backend_mode = project['backend_mode']
-            if backend_mode == 'fastapi':
+            source_format = project['source_format']
+            if source_format == 'multi-file':
+                current_files = {row['path']: row['content'] for row in db.execute(
+                    'SELECT path,content FROM artifacts WHERE project_id=? AND version=?',
+                    (project_id, version - 1),
+                )}
+                if provider:
+                    files = await complete_package(provider, name, brief, phase, feedback, backend_mode, current_files)
+                else:
+                    files = local_source_package(name, brief, phase, backend_mode)
+                await ensure_frontend_build(db_user, project_id, version, files)
+                for path, content in files.items():
+                    save_artifact(db, project_id, 'build', path, content, version)
+            elif backend_mode == 'fastapi':
                 current = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
                                      (project_id, 'index.html')).fetchone()
                 current_backend = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
@@ -149,6 +188,7 @@ async def _advance(
                     )
                     html, python_source, requirements = validate_application(
                         result.get('html', ''), result.get('python', result.get('backend', '')),
+                        result.get('requirements'),
                     )
                 else:
                     html, python_source, requirements = validate_application(
@@ -167,10 +207,11 @@ async def _advance(
                         raise GenerationError('The generated application was not a complete HTML document.')
                 else:
                     html = application_html(name, brief, phase, feedback)
-            save_artifact(db, project_id, 'build', 'index.html', html, version)
+            if source_format == 'single-file':
+                save_artifact(db, project_id, 'build', 'index.html', html, version)
             version_label = 'Refinement' if revise or stage == 'review' else f'Phase {phase}'
-            db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode) VALUES(?,?,?,?,?)',
-                       (project_id, version, version_label, feedback or STAGE_LABELS[stage], backend_mode))
+            db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',
+                       (project_id, version, version_label, feedback or STAGE_LABELS[stage], backend_mode, source_format))
             next_stage = stage if revise else 'build' if phase < 3 else 'review'
             index = project['stage_index'] if revise else 3 if phase < 3 else 4
             db.execute('UPDATE projects SET phase_index=? WHERE id=?', (phase, project_id))
@@ -296,6 +337,10 @@ async def _migrate_architecture(
                         {'stage': project['stage'], 'version': 0})
             return
 
+        if project['source_format'] == 'multi-file':
+            await _migrate_source_package(user_id, project_id, target, provider, feedback, reason)
+            return
+
         current = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?',
                              (project_id, 'index.html', version)).fetchone()
         if not current:
@@ -346,8 +391,40 @@ async def _migrate_architecture(
                 html = application_html(name, brief, phase, direction)
         save_artifact(db, project_id, 'build', 'index.html', html, next_version)
         label = 'FastAPI migration' if target == 'fastapi' else 'Frontend-only migration'
-        db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode) VALUES(?,?,?,?,?)',
-                   (project_id, next_version, label, feedback or reason, target))
+        db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',
+                   (project_id, next_version, label, feedback or reason, target, project['source_format']))
+        db.execute('''UPDATE projects SET backend_mode=?,backend_reason=?,current_version=?,status=?,updated_at=?
+                      WHERE id=?''', (target, reason, next_version, 'ready', now(), project_id))
+        add_event(db, project_id, f'Architecture migrated to {target} as version {next_version}', 'success')
+        add_message(db, project_id, 'agent',
+                    f'Version {next_version} now uses {target}. Your phase and published release are unchanged.',
+                    'stage', {'stage': project['stage'], 'version': next_version})
+
+
+async def _migrate_source_package(
+    user_id: int, project_id: str, target: str, provider: dict | None, feedback: str, reason: str,
+) -> None:
+    with workspace_db(user_id) as db:
+        project = get_project(db, project_id)
+        version = project['current_version']
+        next_version = version + 1
+        current_files = {row['path']: row['content'] for row in db.execute(
+            'SELECT path,content FROM artifacts WHERE project_id=? AND version=?', (project_id, version),
+        )}
+        direction = (f'Architecture migration to {target}. Preserve the current React design and interactions. '
+                     f'User direction: {feedback or "None"}')
+        if provider:
+            files = await complete_package(
+                provider, project['name'], project['brief'], max(1, project['phase_index']), direction, target, current_files,
+            )
+        else:
+            files = local_source_package(project['name'], project['brief'], max(1, project['phase_index']), target)
+        await ensure_frontend_build(user_id, project_id, next_version, files)
+        for path, content in files.items():
+            save_artifact(db, project_id, 'build', path, content, next_version)
+        label = 'FastAPI migration' if target == 'fastapi' else 'Frontend-only migration'
+        db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',
+                   (project_id, next_version, label, feedback or reason, target, project['source_format']))
         db.execute('''UPDATE projects SET backend_mode=?,backend_reason=?,current_version=?,status=?,updated_at=?
                       WHERE id=?''', (target, reason, next_version, 'ready', now(), project_id))
         add_event(db, project_id, f'Architecture migrated to {target} as version {next_version}', 'success')
