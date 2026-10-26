@@ -100,7 +100,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
     const previousVersion = project.current_version
     setBusy(true); setError('')
     try {
-      const next = await api<Project>(`/projects/${id}/advance`, { method: 'POST', body: JSON.stringify({ feedback: '' }) })
+      const next = await api<Project>(`/projects/${id}/advance`, { method: 'POST', body: JSON.stringify({ feedback: '', defer: true }) })
       setProject(next)
       if (next.current_version !== previousVersion) setPreviewKey(k => k + 1)
       if (next.stage === 'build' || next.stage === 'review') setTab('preview')
@@ -117,7 +117,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
     setProject(current => current ? { ...current, messages: [...current.messages, optimistic] } : current)
     setMessage(''); setSelection(null); setBusy(true); setError('')
     try {
-      const next = await api<Project>(`/projects/${id}/messages`, { method: 'POST', body: JSON.stringify({ content, selection: selected }) })
+      const next = await api<Project>(`/projects/${id}/messages`, { method: 'POST', body: JSON.stringify({ content, selection: selected, defer: true }) })
       setProject(next)
       if (next.current_version !== previousVersion) setPreviewKey(k => k + 1)
     } catch (reason) {

@@ -7,7 +7,7 @@ from .database import control_db, workspace_db, rows
 from .deps import current_user, admin_user, owned_project
 from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput, ArchitectureInput
 from .security import hash_password, verify_password, create_token, encrypt_secret, decrypt_secret
-from .engine import add_message, add_event, save_artifact, generate_stage, migrate_architecture, safe_selector
+from .engine import add_message, add_event, generate_stage, migrate_architecture, revise_document, safe_selector
 from .llm import GenerationError
 from .backend_engine import BACKEND_PATH, REQUIREMENTS_PATH
 from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manager
@@ -272,41 +272,39 @@ async def advance_project(project_id: str, body: StageInput, user=Depends(curren
     with control_db() as db:
         from .engine import provider_for_user
         provider = provider_for_user(db, user['id'])
-    await generate_stage(user['id'], project_id, provider, body.feedback)
+    if body.defer:
+        with workspace_db(user['id']) as db:
+            db.execute("UPDATE projects SET status='working',updated_at=CURRENT_TIMESTAMP WHERE id=?", (project_id,))
+        schedule_generation(user['id'], project_id, generate_stage(user['id'], project_id, provider, body.feedback))
+    else:
+        await generate_stage(user['id'], project_id, provider, body.feedback)
     return project_payload(user['id'], project_id)
 
 
 @router.post('/projects/{project_id}/messages')
 async def send_message(project_id: str, body: MessageInput, user=Depends(current_user)):
     project = owned_project(user['id'], project_id)
+    if project['status'] == 'working':
+        raise HTTPException(409, 'The agent is already working')
     selection = safe_selector(body.selection)
     with workspace_db(user['id']) as db:
         add_message(db, project_id, 'user', body.content + selection, metadata={'selection': body.selection or {}})
     with control_db() as db:
         from .engine import provider_for_user
         provider = provider_for_user(db, user['id'])
-    if project['stage'] in {'build', 'review'}:
-        await generate_stage(user['id'], project_id, provider, body.content + selection, revise=True)
-    else:
-        artifact_stage = {'design': 'discovery', 'plan': 'design', 'build': 'plan'}.get(project['stage'])
-        artifact_path = {'discovery': 'product.md', 'design': 'design.md', 'plan': 'plan.md'}.get(artifact_stage)
+
+    async def run_message() -> None:
+        if project['stage'] in {'build', 'review'}:
+            await generate_stage(user['id'], project_id, provider, body.content + selection, revise=True)
+        else:
+            await revise_document(user['id'], project_id, provider, body.content)
+
+    if body.defer:
         with workspace_db(user['id']) as db:
-            db.execute("UPDATE projects SET description=description || ?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (f"\n- {body.content[:1000]}", project_id))
-            artifact = db.execute('SELECT content,version FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
-                                  (project_id, artifact_path)).fetchone() if artifact_path else None
-            if artifact:
-                if provider:
-                    from .llm import complete
-                    result = await complete(provider, 'You are a senior product designer. Revise the supplied artifact in response to feedback while preserving its Markdown structure.',
-                        f'Feedback: {body.content}\nCurrent document:\n{artifact["content"]}\nReturn {{"document":"complete revised markdown..."}}.')
-                    content = result.get('document', artifact['content'])
-                else:
-                    content = artifact['content'] + f'\n\n## Revision direction\n{body.content}\n'
-                save_artifact(db, project_id, artifact_stage, artifact_path, content, artifact['version'])
-                add_event(db, project_id, f'{artifact_path} revised from feedback', 'success')
-                add_message(db, project_id, 'agent', f'I’ve applied your feedback to `{artifact_path}` and carried the direction forward into the next stages.')
-            else:
-                add_message(db, project_id, 'agent', f'Noted. I’ll carry this direction into the next artifact: “{body.content[:240]}”')
+            db.execute("UPDATE projects SET status='working',updated_at=CURRENT_TIMESTAMP WHERE id=?", (project_id,))
+        schedule_generation(user['id'], project_id, run_message())
+    else:
+        await run_message()
     return project_payload(user['id'], project_id)
 
 

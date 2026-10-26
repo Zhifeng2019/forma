@@ -157,3 +157,63 @@ def test_feedback_refines_current_phase_without_advancing():
     assert project['stage'] == 'build'
     assert project['phase_index'] == 2
     assert project['current_version'] == 3
+
+
+def test_deferred_document_build_and_feedback_actions_update_in_background():
+    with TestClient(app) as live:
+        response = live.post('/api/auth/register', json={
+            'email': 'deferred-actions@example.com', 'name': 'Deferred Actions', 'password': 'password123',
+        })
+        token = response.json()['token']
+        response = live.post('/api/projects', headers=auth(token), json={
+            'name': 'Deferred Actions App', 'brief': 'A personal planning tool with a clear product document and weekly overview.',
+            'backend_mode': 'static', 'auto_mode': False,
+        })
+        project = response.json()
+        project_id = project['id']
+
+        def wait_ready():
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                current = live.get(f'/api/projects/{project_id}', headers=auth(token)).json()
+                if current['status'] != 'working':
+                    return current
+                time.sleep(0.05)
+            raise AssertionError('Background generation did not finish')
+
+        response = live.post(f'/api/projects/{project_id}/messages', headers=auth(token), json={
+            'content': 'Add a concise release-safety section.', 'defer': True,
+        })
+        assert response.status_code == 200, response.text
+        project = response.json()
+        assert project['status'] == 'working' and project['current_version'] == 0
+        assert project['messages'][-1]['role'] == 'user'
+        project = wait_ready()
+        assert project['status'] == 'ready' and project['stage'] == 'design'
+        product = next(artifact['content'] for artifact in project['artifacts'] if artifact['path'] == 'product.md')
+        assert 'release-safety section' in product
+
+        for _ in range(2):
+            response = live.post(f'/api/projects/{project_id}/advance', headers=auth(token), json={})
+            project = response.json()
+        assert project['stage'] == 'build' and project['phase_index'] == 0
+        response = live.post(f'/api/projects/{project_id}/advance', headers=auth(token), json={'defer': True})
+        assert response.status_code == 200, response.text
+        project = response.json()
+        assert project['status'] == 'working' and project['current_version'] == 0
+        project = wait_ready()
+        assert project['status'] == 'ready'
+        assert project['current_version'] == 1 and project['phase_index'] == 1
+
+        response = live.post(f'/api/projects/{project_id}/messages', headers=auth(token), json={
+            'content': 'Refine this same phase with a calmer primary action.', 'defer': True,
+        })
+        assert response.status_code == 200, response.text
+        project = response.json()
+        assert project['status'] == 'working' and project['current_version'] == 1
+        assert project['messages'][-1]['role'] == 'user'
+        project = wait_ready()
+        assert project['status'] == 'ready'
+        assert project['current_version'] == 2 and project['phase_index'] == 1
+        assert project['versions'][0]['label'] == 'Refinement'
+        assert live.delete(f'/api/projects/{project_id}', headers=auth(token)).status_code == 200

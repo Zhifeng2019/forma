@@ -47,7 +47,19 @@ test('a user can shape, build, revise, and publish an application', async ({ pag
   await expect(page.getByRole('button', { name: 'Approve phase 2' })).toHaveCount(0)
   await page.unroute('**/api/projects/*/messages')
 
+  let releaseAdvance: () => void = () => {}
+  let advanceHandled = false
+  await page.route('**/api/projects/*/advance', async route => {
+    await new Promise<void>(resolve => { releaseAdvance = resolve })
+    await route.continue()
+    advanceHandled = true
+  })
   await page.getByRole('button', { name: 'Approve phase 1' }).click()
+  try {
+    await expect(page.locator('.approval-bar').getByText('Building your application…', { exact: true })).toBeVisible()
+  } finally { releaseAdvance() }
+  await expect.poll(() => advanceHandled).toBe(true)
+  await page.unroute('**/api/projects/*/advance')
   await expect(page.getByRole('button', { name: 'Approve phase 2' })).toBeEnabled()
   await page.getByRole('button', { name: 'Approve phase 2' }).click()
   await expect(page.getByRole('button', { name: 'Approve release' })).toBeEnabled()

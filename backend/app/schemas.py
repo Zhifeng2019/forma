@@ -38,10 +38,12 @@ class ProjectInput(BaseModel):
 class MessageInput(BaseModel):
     content: str = Field(min_length=1, max_length=12000)
     selection: dict | None = None
+    defer: bool = False
 
 
 class StageInput(BaseModel):
     feedback: str = ''
+    defer: bool = False
 
 
 class PublishInput(BaseModel):

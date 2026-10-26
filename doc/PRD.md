@@ -133,6 +133,8 @@ Project creation opens the workspace immediately in a working state while genera
 
 User messages appear in the conversation immediately with a working indicator. A failed request removes the unconfirmed optimistic message and restores the composer. During build and review, a feedback message creates a refinement of the **current phase** without changing its approval state. Only the explicit approval action advances to the next phase.
 
+Phase approvals, build-phase feedback, and early document revisions use deferred generation jobs in the builder. The API returns a working project immediately while the current document or preview remains visible. Polling supplies the agent response, revised artifact, or new application version when generation completes. API clients can omit `defer` to retain synchronous behavior.
+
 ### 4.4.1 Architecture migration
 
 The architecture control in the builder lets an existing project move from frontend-only to FastAPI or from FastAPI to frontend-only. Migration creates a new version and never counts as phase approval. Before the first build, the selection changes the foundation for the upcoming version instead. Migration runs as a deferred background job: the dialog closes immediately, a migration-specific working label appears, and polling refreshes the preview when the new version is ready rather than blocking the workspace on the model response.
@@ -277,6 +279,7 @@ The optional-backend release is accepted when:
 - Existing projects migrate in both directions without advancing the phase, and each historical version retains its correct architecture.
 - A published static version remains static after a FastAPI migration; a published FastAPI version remains operational after migrating the working version to static until republication.
 - Deferred creation and autopilot refresh the workspace through the final preview without a manual page reload.
+- Deferred document revision and phase generation return `working` immediately, then update the corresponding document or application version in the background; real-provider runs finish with a healthy backend.
 - A user message appears immediately even while its model request is delayed; failed sends restore the composer.
 - Feedback during a build phase creates a refinement without advancing that phase; explicit approval is required to advance.
 - Preview element selection reaches the revision request, and a revision creates a new version.

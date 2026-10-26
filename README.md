@@ -15,7 +15,7 @@ Forma is an AI-native application builder built around a guided product-developm
 - Versioned `main.py` and pinned `requirements.txt` artifacts for backend-enabled applications.
 - Per-app Python environments with packages physically installed from the Aliyun PyPI mirror, application-local SQLite persistence, health checks, runtime logs, and independent preview/public processes.
 - A Server panel for backend health, source review, actionable error summaries with expandable technical details, and preview restart.
-- Immediate optimistic chat updates and automatic workspace refresh while generation or autopilot is running.
+- Immediate optimistic chat updates and automatic workspace refresh during phase builds, document revisions, architecture migration, and autopilot.
 - Feedback that refines the current phase without advancing it; only explicit approval moves to the next phase.
 - Conversational revisions and preview element selection for targeted feedback.
 - Desktop, tablet, and mobile preview modes.

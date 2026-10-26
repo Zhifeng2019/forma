@@ -188,6 +188,62 @@ async def _advance(
         add_message(db, project_id, 'agent', message, 'stage', {'stage': next_stage, 'version': version})
 
 
+async def revise_document(
+    user_id: int, project_id: str, provider: dict | None, feedback: str,
+) -> None:
+    if project_id in _running:
+        raise GenerationError('This project is already being updated.')
+    _running.add(project_id)
+    try:
+        with workspace_db(user_id) as db:
+            project = get_project(db, project_id)
+            if not project:
+                return
+            db.execute("UPDATE projects SET status='working',updated_at=? WHERE id=?", (now(), project_id))
+            engine_label = f'{provider["name"]} · {provider["model"]}' if provider else 'Forma Local'
+            add_event(db, project_id, f'Document revision started with {engine_label}')
+        try:
+            await _revise_document(user_id, project_id, provider, feedback)
+        except Exception as exc:
+            with workspace_db(user_id) as db:
+                db.execute("UPDATE projects SET status='error',updated_at=? WHERE id=?", (now(), project_id))
+                add_event(db, project_id, str(exc), 'error')
+                add_message(db, project_id, 'agent', f'I hit a problem: {exc}', 'error')
+    finally:
+        _running.discard(project_id)
+
+
+async def _revise_document(
+    user_id: int, project_id: str, provider: dict | None, feedback: str,
+) -> None:
+    with workspace_db(user_id) as db:
+        project = get_project(db, project_id)
+        stage = project['stage']
+        artifact_stage = {'design': 'discovery', 'plan': 'design', 'build': 'plan'}.get(stage)
+        artifact_path = {'discovery': 'product.md', 'design': 'design.md', 'plan': 'plan.md'}.get(artifact_stage)
+        db.execute("UPDATE projects SET description=description || ?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                   (f"\n- {feedback[:1000]}", project_id))
+        artifact = db.execute('SELECT content,version FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
+                              (project_id, artifact_path)).fetchone() if artifact_path else None
+        if artifact:
+            if provider:
+                result = await complete(
+                    provider,
+                    'You are a senior product designer. Revise the supplied artifact in response to feedback while preserving its Markdown structure.',
+                    f'Feedback: {feedback}\nCurrent document:\n{artifact["content"]}\nReturn {{"document":"complete revised markdown..."}}.',
+                )
+                content = result.get('document', artifact['content'])
+            else:
+                content = artifact['content'] + f'\n\n## Revision direction\n{feedback}\n'
+            save_artifact(db, project_id, artifact_stage, artifact_path, content, artifact['version'])
+            add_event(db, project_id, f'{artifact_path} revised from feedback', 'success')
+            add_message(db, project_id, 'agent',
+                        f'I’ve applied your feedback to `{artifact_path}` and carried the direction forward into the next stages.')
+        else:
+            add_message(db, project_id, 'agent', f'Noted. I’ll carry this direction into the next artifact: “{feedback[:240]}”')
+        db.execute("UPDATE projects SET status='ready',updated_at=? WHERE id=?", (now(), project_id))
+
+
 async def migrate_architecture(
     user_id: int, project_id: str, target: str, provider: dict | None, feedback: str = '',
     deferred: bool = False,
