@@ -45,10 +45,16 @@ def _compile_single_file(spec: AppSpec, source_files: dict[str, str]) -> dict[st
     return files
 
 
-def compile_package(spec: AppSpec | dict, source_files: dict[str, str]) -> CompiledPackage:
+def compile_package(
+    spec: AppSpec | dict, source_files: dict[str, str] | None = None, phase: int = 1,
+) -> CompiledPackage:
     """Validate cross-contract policy before returning any buildable source."""
     spec = normalize_spec_manifest(parse_appspec(spec))
     source_format = spec.architecture.source_format
+    synthesized = source_files is None
+    if synthesized:
+        from .source import synthesize_source
+        source_files = synthesize_source(spec, phase)
     files = normalize_source_files(source_files, source_format)
     files = compile_dependency_files(spec, files)
     validate_manifest(spec, files)
@@ -61,4 +67,6 @@ def compile_package(spec: AppSpec | dict, source_files: dict[str, str]) -> Compi
     source_hash = canonical_input_hash(files)
     manifest = build_manifest(spec, files, spec_hash)
     manifest['source_hash'] = source_hash
+    if synthesized:
+        manifest['generation'] = {'mode': 'appspec', 'phase': phase}
     return CompiledPackage(spec, files, manifest, spec_hash, source_hash)

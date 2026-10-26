@@ -95,7 +95,7 @@ def test_migration_dual_writes_version_specific_contract(monkeypatch, source_for
         assert db.execute('SELECT COUNT(*) FROM versions WHERE project_id=?', (project_id,)).fetchone()[0] == 2
 
 
-def test_metadata_is_excluded_from_later_model_packages(monkeypatch):
+def test_refinement_uses_previous_appspec_not_a_file_map(monkeypatch):
     user_id = 920300
     project_id = make_project(user_id, 'multi-file', 'fastapi')
     monkeypatch.setattr(settings, 'appspec_v1', True)
@@ -103,16 +103,22 @@ def test_metadata_is_excluded_from_later_model_packages(monkeypatch):
     asyncio.run(engine._advance(user_id, project_id, None))
     received = []
 
-    async def generated(_provider, name, brief, phase, feedback, backend_mode, current_files):
-        received.append(current_files)
-        return local_source_package(name, brief, phase, backend_mode)
+    async def generated(_project, _provider, phase, _feedback, current_spec, brief):
+        received.append(current_spec)
+        from app.spec.compiler import compile_package
+        return compile_package(current_spec['spec'], phase=phase)
 
-    monkeypatch.setattr(engine, 'complete_package', generated)
+    async def unexpected_file_generation(*_args):
+        raise AssertionError('Legacy file-map generation must not run with AppSpec enabled')
+
+    monkeypatch.setattr(engine, 'generate_appspec_package', generated)
+    monkeypatch.setattr(engine, 'complete_package', unexpected_file_generation)
     provider = {'name': 'Test provider', 'model': 'test-model'}
     asyncio.run(engine._advance(user_id, project_id, provider, 'Refine the current phase', revise=True))
     assert len(received) == 1
-    assert 'frontend/src/App.jsx' in received[0]
-    assert not set(received[0]) & set(SPEC_ARTIFACT_PATHS)
+    assert received[0]['spec']['product']['name'] == 'AppSpec Workflow'
+    assert len(received[0]['spec_hash']) == 64
+    assert 'files' not in received[0]
     assert 'appspec.json' in artifacts(user_id, project_id, 2)
 
 
@@ -120,12 +126,22 @@ def test_invalid_spec_never_reaches_frontend_build(monkeypatch):
     user_id = 920400
     project_id = make_project(user_id, 'multi-file', 'fastapi')
     monkeypatch.setattr(settings, 'appspec_v1', True)
-    monkeypatch.setattr(engine, 'local_source_package', lambda *_args: {'frontend/index.html': 'invalid'})
     build_calls = []
+
+    async def invalid_proposal(*_args, **_kwargs):
+        from app.spec.defaults import local_default_appspec
+        document = local_default_appspec('Invalid App', 'Invalid contract.', 'multi-file', 'fastapi').model_dump(
+            mode='json', exclude_none=True,
+        )
+        second = dict(document['entities'][0])
+        second['name'] = 'Second'
+        document['entities'].append(second)
+        return document
 
     async def unexpected_build(*_args):
         build_calls.append(True)
 
+    monkeypatch.setattr('app.spec.service.propose_appspec', invalid_proposal)
     monkeypatch.setattr(engine, 'ensure_frontend_build', unexpected_build)
     with pytest.raises(GenerationError):
         asyncio.run(engine._advance(user_id, project_id, None))
@@ -144,6 +160,38 @@ def test_build_digest_ignores_provenance_metadata():
         'build-manifest.json': '{"files": []}',
     }
     assert _digest(files) == _digest(with_provenance)
+
+
+def test_provider_build_requests_appspec_instead_of_source(monkeypatch):
+    user_id = 920500
+    project_id = make_project(user_id, 'multi-file', 'fastapi')
+    monkeypatch.setattr(settings, 'appspec_v1', True)
+    monkeypatch.setattr(engine, 'ensure_frontend_build', no_frontend_build)
+    calls = []
+
+    async def structured_proposal(_provider, _system, prompt, schema, schema_name):
+        from app.spec.defaults import local_default_appspec
+        calls.append((prompt, schema, schema_name))
+        return local_default_appspec(
+            'AppSpec Workflow', 'A focused workspace with provenance.', 'multi-file', 'fastapi',
+        ).model_dump(mode='json', exclude_none=True)
+
+    async def unexpected_legacy_call(*_args):
+        raise AssertionError('Legacy source generation must not be called')
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', structured_proposal)
+    monkeypatch.setattr(engine, 'complete', unexpected_legacy_call)
+    monkeypatch.setattr(engine, 'complete_package', unexpected_legacy_call)
+    asyncio.run(engine._advance(user_id, project_id, {'name': 'Test provider', 'model': 'test-model'}))
+    assert len(calls) == 1
+    prompt, schema, schema_name = calls[0]
+    assert schema_name == 'forma_appspec'
+    assert schema['required'] == ['product', 'entities', 'api', 'frontend', 'acceptance']
+    assert 'Current HTML' not in prompt and 'Current package files' not in prompt
+    files = artifacts(user_id, project_id, 1)
+    manifest = json.loads(files['build-manifest.json'])
+    assert manifest['generation'] == {'mode': 'appspec', 'phase': 1}
+    assert 'class ItemInput' in files['backend/app/models.py']
 
 
 def test_deferred_durable_autopilot_writes_spec_for_every_version(monkeypatch):

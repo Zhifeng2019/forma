@@ -51,3 +51,48 @@ def test_multi_file_appspec_preview_and_deployment_package(monkeypatch):
         assert spec['spec']['architecture']['backend_mode'] == 'static'
         assert spec['spec_hash'] == manifest['spec_hash']
         assert client.delete(f'/api/projects/{project_id}', headers=headers).status_code == 200
+
+
+def test_multi_file_appspec_fastapi_runtime_crud_and_restart(monkeypatch):
+    monkeypatch.setattr(settings, 'appspec_v1', True)
+    with TestClient(app) as client:
+        response = client.post('/api/auth/register', json={
+            'email': f'appspec-runtime-{uuid.uuid4().hex}@example.com',
+            'name': 'AppSpec Runtime Tester', 'password': 'password123',
+        })
+        assert response.status_code == 200, response.text
+        token = response.json()['token']
+        headers = {'Authorization': f'Bearer {token}'}
+        response = client.post('/api/projects', headers=headers, json={
+            'name': 'AppSpec Runtime',
+            'brief': 'A shared item workspace with persistent server state.',
+            'backend_mode': 'fastapi', 'source_format': 'multi-file', 'auto_mode': False,
+        })
+        assert response.status_code == 200, response.text
+        project = response.json()
+        project_id = project['id']
+        for _ in range(3):
+            response = client.post(f'/api/projects/{project_id}/advance', headers=headers, json={})
+            assert response.status_code == 200, response.text
+            project = response.json()
+        assert project['status'] == 'ready', project['messages'][-1]['content']
+        preview = client.get(f'/api/projects/{project_id}/preview?access_token={token}')
+        assert preview.status_code == 200 and './assets/' in preview.text
+
+        private_api = f'/api/projects/{project_id}/runtime/1'
+        assert client.get(f'{private_api}/health', headers=headers).status_code == 200
+        response = client.post(f'{private_api}/items', headers=headers, json={
+            'title': 'Verify generated runtime', 'completed': False,
+        })
+        assert response.status_code == 201, response.text
+        item = response.json()
+        response = client.patch(f'{private_api}/items/{item["id"]}', headers=headers, json={'completed': True})
+        assert response.status_code == 200 and response.json()['completed'] is True
+        response = client.post(f'/api/projects/{project_id}/runtime/restart', headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()['healthy'] is True
+        items = client.get(f'{private_api}/items', headers=headers).json()['items']
+        restored = next(row for row in items if row['id'] == item['id'])
+        assert restored['title'] == 'Verify generated runtime' and restored['completed'] is True
+        assert client.delete(f'{private_api}/items/{item["id"]}', headers=headers).status_code == 204
+        assert client.delete(f'/api/projects/{project_id}', headers=headers).status_code == 200

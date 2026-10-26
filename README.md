@@ -79,8 +79,9 @@ The v1.4 work is additive and disabled by default. Task status and acceptance ev
 
 - Typed feature flags cover durable jobs, AppSpec, acceptance gates, specialist workers, and sandboxing.
 - The durable runner supports idempotent jobs, attempts, checkpoints, heartbeat, cancellation, retry, and stale-finalization protection for stage generation, document revision, and architecture migration.
-- AppSpec v1 provides a typed contract, deterministic package compiler, legacy adapter, and dual-written `appspec.json` and `build-manifest.json` provenance for new and migrated versions when `APPSPEC_V1` is enabled.
-- AppSpec currently coexists with the existing source generators. Schema-aware model proposals, resumable SSE, full tool telemetry, deterministic release gates, specialist workers, and sandboxing remain separate tracked tasks.
+- AppSpec v1 provides schema-aware provider proposals with a structured-JSON fallback, one bounded semantic repair, a typed contract, deterministic single-entity CRUD source synthesis, and a legacy adapter.
+- With `APPSPEC_V1` enabled, builds, refinements, and migrations compile from AppSpec and persist `appspec.json` plus `build-manifest.json`. The v1 compiler supports one entity and reviewed collection CRUD routes; flag-off behavior preserves the existing generators.
+- Optional contract review, broader multi-entity synthesis, resumable SSE, full tool telemetry, deterministic release gates, specialist workers, and sandboxing remain separate tracked tasks.
 
 Regenerate the evaluation baseline with:
 

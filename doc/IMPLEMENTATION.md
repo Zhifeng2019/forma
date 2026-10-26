@@ -1,7 +1,7 @@
 # Forma Studio v1.4 — Implementation Tracker
 
 **Last updated:** 2026-10-27  
-**Current focus:** SPEC-03 — Schema-aware model proposals and bounded repair  
+**Current focus:** SPEC-06 — Optional AppSpec contract review
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
 This is the persistent implementation record for the approved sequence:
@@ -10,7 +10,17 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — AppSpec compatibility slice
+## Latest completed increment — SPEC-03 schema-aware generation
+
+- [x] **SPEC-03A — Structured proposal transport.** Provider JSON Schema is supported with a structured-JSON compatibility fallback; existing truncation repair remains intact.
+- [x] **SPEC-03B — Proposal normalization and bounded repair.** Studio owns name, architecture, dependencies, and manifest policy. Valid JSON with an invalid contract receives exactly one semantic repair.
+- [x] **SPEC-03C — Deterministic source synthesis.** One declared entity and its reviewed CRUD contract compile into single-file or multi-file applications without model-supplied source blobs.
+- [x] **SPEC-03D — Engine integration.** Builds, refinements, and migrations consume previous AppSpecs rather than provider file maps. Legacy-source and flag-off behavior remain intact.
+- [x] **SPEC-03E — Verification.** Invalid proposals, repair bounds, deterministic output, both architectures/formats, real CRUD/persistence, Vite builds, deferred jobs, and the complete regression suite pass.
+
+**v1 synthesis boundary:** exactly one entity and reviewed collection CRUD routes. Multi-entity relationships and arbitrary operations remain later extensions; the compiler rejects them clearly rather than silently emitting an unrelated template.
+
+## Earlier completed increment — AppSpec compatibility slice
 
 - [x] **SPEC-01 — Versioned AppSpec schema.** Typed product, architecture, entity, API, frontend, dependency, manifest, and acceptance sections reject invalid references before compilation.
 - [x] **SPEC-02 — Deterministic package compiler.** Documented path aliases, allowed paths, ownership, size limits, reviewed dependencies, and deterministic source/spec hashes are implemented and tested.
@@ -18,7 +28,7 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 - [x] **SPEC-05A — Dual-write generation.** With `APPSPEC_V1` enabled, new and migrated versions store `appspec.json` and `build-manifest.json`. Existing generators still produce source in this slice.
 - [x] **SPEC-05B — Compatibility verification.** Both source formats and architectures, bidirectional migration, durable/deferred autopilot, flag-off behavior, real Vite preview, and deployment archives pass.
 
-**Next:** schema-aware model proposals (SPEC-03), followed by optional contract review UI (SPEC-06) and specialist source workers. AppSpec is currently a dual-written contract, not yet the sole source generator.
+**Status:** AppSpec is now the source contract when enabled; legacy generation remains available with the flag off. Next is optional contract review (SPEC-06), followed by deterministic verification.
 
 ## Milestone 0 — Baseline and compatibility
 
@@ -44,12 +54,12 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 
 - [x] **SPEC-01 — Versioned schema.** Implemented in `backend/app/spec/types.py` and `schema.py`; schema and cross-contract tests pass.
 - [x] **SPEC-02 — Deterministic compiler.** Implemented in `manifest.py`, `dependencies.py`, and `compiler.py`; deterministic manifest, dependency, alias, ownership, and size-policy tests pass.
-- [ ] **SPEC-03 — Schema-aware model generation — Next.** Add provider proposals, bounded repair, structured-output compatibility, and AppSpec-hash linkage. Do not substitute free-form file generation for this task.
+- [x] **SPEC-03 — Schema-aware model generation.** Provider JSON Schema fallback, bounded semantic repair, deterministic source synthesis, and AppSpec-hash provenance are implemented; the flagged engine no longer requests free-form source maps.
 - [x] **SPEC-04 — Legacy adapter.** Existing artifacts are represented without regeneration or changes to preview/published URLs; all architecture/source-format combinations pass.
-- [x] **SPEC-05 — Dual-write integration.** New and migrated versions persist AppSpec and build provenance; phase/version semantics and flag-off behavior pass. SPEC-03 remains necessary before AppSpec is the sole generation contract.
-- [ ] **SPEC-06 — Optional contract review.** Add an inspectable entity/API/dependency/acceptance view and prevent invalid specs from proceeding.
+- [x] **SPEC-05 — AppSpec generation integration.** Builds, refinements, and migrations compile from AppSpec and persist provenance; phase/version semantics and flag-off behavior pass.
+- [ ] **SPEC-06 — Optional contract review — Next.** Add an inspectable entity/API/dependency/acceptance view and prevent invalid specs from proceeding.
 
-**Milestone gate:** `[ ]` AppSpec must become the generation contract after SPEC-03; dual-write alone is not the final gate.
+**Milestone gate:** `[ ]` The AppSpec generation contract is complete. Finish SPEC-06 contract review before closing Milestone 2.
 
 ## Milestone 3 — Deterministic verification and deployment registry
 
@@ -95,3 +105,4 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 | 2026-10-26 | Foundation and data relocation | Backend regression and Ruff | 31 passed; data moved to project-root `data/` |
 | 2026-10-27 | Durable runner and engine integration | Complete backend regression and Ruff | 46 passed, including 15 durable-runner tests; lint clean |
 | 2026-10-27 | AppSpec compatibility slice | Complete backend regression, real Vite preview/archive, and Ruff | 83 passed, including 37 AppSpec-focused tests; lint clean |
+| 2026-10-27 | SPEC-03 schema-aware generation | Backend/frontend regressions, real Vite and FastAPI CRUD/restart, Ruff | 102 backend and 5 frontend tests passed; production build and lint clean |

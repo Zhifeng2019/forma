@@ -12,6 +12,13 @@ TEST_DATA = Path(tempfile.mkdtemp(prefix='forma-test-', dir=TEST_ROOT))
 os.environ['DATA_DIR'] = str(TEST_DATA)
 os.environ['SECRET_KEY'] = 'test-secret-key-with-at-least-32-bytes'
 os.environ['RUNTIME_PYTHON'] = sys.executable
+# Host rollouts may enable v1.4 features. Every suite starts from legacy
+# defaults; opt-in tests enable flags explicitly with monkeypatch.
+os.environ['DURABLE_JOBS_V1'] = 'false'
+os.environ['APPSPEC_V1'] = 'false'
+os.environ['ACCEPTANCE_GATE_V1'] = 'false'
+os.environ['SPECIALIST_WORKERS_V1'] = 'false'
+os.environ['SANDBOX_V1'] = 'false'
 
 
 def pytest_sessionfinish(session, exitstatus):

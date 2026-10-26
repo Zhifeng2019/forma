@@ -42,6 +42,24 @@ def _inference_options(provider: dict) -> dict:
 
 
 async def complete(provider: dict, system: str, prompt: str) -> dict:
+    return await _complete(provider, system, prompt, {'type': 'json_object'})
+
+
+async def complete_with_schema(
+    provider: dict, system: str, prompt: str, schema: dict, schema_name: str,
+) -> dict:
+    """Use native structured output when available, with one compatibility fallback."""
+    response_format = {
+        'type': 'json_schema',
+        'json_schema': {'name': schema_name, 'strict': True, 'schema': schema},
+    }
+    return await _complete(provider, system, prompt, response_format, allow_json_fallback=True)
+
+
+async def _complete(
+    provider: dict, system: str, prompt: str, response_format: dict,
+    allow_json_fallback: bool = False,
+) -> dict:
     if not provider:
         raise GenerationError('Choose a model provider in Configuration, or use the local engine.')
     if not provider.get('api_key_encrypted'):
@@ -55,13 +73,18 @@ async def complete(provider: dict, system: str, prompt: str) -> dict:
         # Provider egress is explicit: malformed host-level NO_PROXY values must
         # not prevent the OpenAI-compatible client from initializing.
         async with httpx.AsyncClient(timeout=240, trust_env=False) as client:
-            for attempt in range(OUTPUT_REPAIR_ATTEMPTS + 1):
+            attempt = 0
+            while attempt <= OUTPUT_REPAIR_ATTEMPTS:
                 response = await client.post(url,
                     headers={'Authorization': f'Bearer {decrypt_secret(provider["api_key_encrypted"])}'},
                     json={'model': provider['model'], 'messages': messages,
-                          'temperature': 0.35, 'response_format': {'type': 'json_object'},
+                          'temperature': 0.35, 'response_format': response_format,
                           'max_tokens': MAX_OUTPUT_TOKENS, **_inference_options(provider)})
                 if response.status_code >= 400:
+                    if (allow_json_fallback and response_format.get('type') == 'json_schema'
+                            and response.status_code in {400, 404, 422}):
+                        response_format = {'type': 'json_object'}
+                        continue
                     raise GenerationError(f'Provider returned {response.status_code}: {response.text[:300]}')
                 payload = response.json()
                 choices = payload.get('choices') or []
@@ -91,6 +114,7 @@ async def complete(provider: dict, system: str, prompt: str) -> dict:
                         'the output budget. Do not add commentary or Markdown fences.'
                     )},
                 ]
+                attempt += 1
         raise GenerationError('The model did not return a usable structured response.')
     except GenerationError:
         raise

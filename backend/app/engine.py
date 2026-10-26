@@ -12,8 +12,9 @@ from .frontend_builder import ensure_frontend_build
 from .source_packages import local_source_package, package_prompt, validate_source_package
 from .features import FeatureFlag, feature_enabled
 from .jobs.runner import run_generation_job
-from .spec.schema import SPEC_ARTIFACT_PATHS
-from .spec.service import compile_legacy_package, spec_artifacts
+from .spec.legacy_adapter import legacy_appspec
+from .spec.schema import APPSPEC_PATH, SPEC_ARTIFACT_PATHS
+from .spec.service import compile_legacy_package, generate_appspec_package, spec_artifacts
 
 STAGES = ['discovery', 'design', 'plan', 'build', 'review', 'deploy']
 STAGE_LABELS = {
@@ -51,6 +52,19 @@ def generation_source_files(db, project_id: str, version: int) -> dict[str, str]
         'SELECT path,content FROM artifacts WHERE project_id=? AND version=? AND path NOT IN (?,?)',
         (project_id, version, *SPEC_ARTIFACT_PATHS),
     )}
+
+
+def generation_appspec(db, project, version: int):
+    if version <= 0:
+        return None
+    row = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?',
+                     (project['id'], APPSPEC_PATH, version)).fetchone()
+    if row:
+        return json.loads(row['content'])
+    files = generation_source_files(db, project['id'], version)
+    if not files:
+        return None
+    return legacy_appspec(project, files).model_dump(mode='json', exclude_none=True)
 
 
 def compile_with_appspec(project, files: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
@@ -206,7 +220,14 @@ async def _advance(
             version += 1
             backend_mode = project['backend_mode']
             source_format = project['source_format']
-            if source_format == 'multi-file':
+            appspec_enabled = feature_enabled(FeatureFlag.APPSPEC_V1)
+            if appspec_enabled:
+                compiled = await generate_appspec_package(
+                    project, provider, phase, feedback,
+                    generation_appspec(db, project, version - 1), brief=brief,
+                )
+                files, provenance = compiled.files, spec_artifacts(compiled)
+            elif source_format == 'multi-file':
                 current_files = generation_source_files(db, project_id, version - 1)
                 if provider:
                     files = await complete_package(provider, name, brief, phase, feedback, backend_mode, current_files)
@@ -244,11 +265,12 @@ async def _advance(
                         raise GenerationError('The generated application was not a complete HTML document.')
                 else:
                     html = application_html(name, brief, phase, feedback)
-            if source_format == 'single-file':
+            if source_format == 'single-file' and not appspec_enabled:
                 files = {'index.html': html}
                 if backend_mode == 'fastapi':
                     files.update({BACKEND_PATH: python_source, REQUIREMENTS_PATH: requirements})
-            files, provenance = compile_with_appspec(project, files)
+            if not appspec_enabled:
+                files, provenance = compile_with_appspec(project, files)
             if source_format == 'multi-file':
                 await ensure_frontend_build(db_user, project_id, version, files)
             for path, content in files.items():
@@ -450,7 +472,16 @@ async def _migrate_architecture(
         next_version = version + 1
         direction = (f'Architecture migration to {target}. Preserve the current visual design and working interactions. '
                      f'User direction: {feedback or "None"}')
-        if target == 'fastapi':
+        spec_project = dict(project)
+        spec_project['backend_mode'] = target
+        appspec_enabled = feature_enabled(FeatureFlag.APPSPEC_V1)
+        if appspec_enabled:
+            compiled = await generate_appspec_package(
+                spec_project, provider, phase, feedback, generation_appspec(db, project, version),
+                brief=f'{brief}\n\n{direction}',
+            )
+            files, provenance = compiled.files, spec_artifacts(compiled)
+        elif target == 'fastapi':
             direction += (' Replace browser-owned shared state with the new FastAPI service. Keep the existing '
                           'frontend recognizable while adding a complete API and Forma.api integration.')
             if provider:
@@ -486,12 +517,11 @@ async def _migrate_architecture(
                     raise GenerationError('The frontend-only migration still contains backend calls. Please retry.')
             else:
                 html = application_html(name, brief, phase, direction)
-        files = {'index.html': html}
-        if target == 'fastapi':
-            files.update({BACKEND_PATH: python_source, REQUIREMENTS_PATH: requirements})
-        spec_project = dict(project)
-        spec_project['backend_mode'] = target
-        files, provenance = compile_with_appspec(spec_project, files)
+        if not appspec_enabled:
+            files = {'index.html': html}
+            if target == 'fastapi':
+                files.update({BACKEND_PATH: python_source, REQUIREMENTS_PATH: requirements})
+            files, provenance = compile_with_appspec(spec_project, files)
         for path, content in files.items():
             save_artifact(db, project_id, 'build', path, content, next_version)
         for path, content in provenance.items():
@@ -514,18 +544,25 @@ async def _migrate_source_package(
         project = get_project(db, project_id)
         version = project['current_version']
         next_version = version + 1
-        current_files = generation_source_files(db, project_id, version)
         direction = (f'Architecture migration to {target}. Preserve the current React design and interactions. '
                      f'User direction: {feedback or "None"}')
-        if provider:
-            files = await complete_package(
-                provider, project['name'], project['brief'], max(1, project['phase_index']), direction, target, current_files,
-            )
-        else:
-            files = local_source_package(project['name'], project['brief'], max(1, project['phase_index']), target)
         spec_project = dict(project)
         spec_project['backend_mode'] = target
-        files, provenance = compile_with_appspec(spec_project, files)
+        if feature_enabled(FeatureFlag.APPSPEC_V1):
+            compiled = await generate_appspec_package(
+                spec_project, provider, max(1, project['phase_index']), feedback,
+                generation_appspec(db, project, version), brief=f'{project["brief"]}\n\n{direction}',
+            )
+            files, provenance = compiled.files, spec_artifacts(compiled)
+        else:
+            current_files = generation_source_files(db, project_id, version)
+            if provider:
+                files = await complete_package(
+                    provider, project['name'], project['brief'], max(1, project['phase_index']), direction, target, current_files,
+                )
+            else:
+                files = local_source_package(project['name'], project['brief'], max(1, project['phase_index']), target)
+            files, provenance = compile_with_appspec(spec_project, files)
         await ensure_frontend_build(user_id, project_id, next_version, files)
         for path, content in files.items():
             save_artifact(db, project_id, 'build', path, content, next_version)

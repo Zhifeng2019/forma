@@ -75,3 +75,43 @@ async def test_invalid_json_gets_one_repair_attempt(monkeypatch):
     assert result == {'document': 'repaired'}
     assert len(FakeClient.calls) == 2
     assert FakeClient.calls[0]['json']['reasoning_effort'] == 'low'
+
+
+@pytest.mark.asyncio
+async def test_native_json_schema_is_used_for_structured_proposals(monkeypatch):
+    FakeClient.responses = [FakeResponse('{"product":{}}')]
+    FakeClient.calls = []
+    monkeypatch.setattr(httpx, 'AsyncClient', FakeClient)
+    provider = {
+        'name': 'OpenAI', 'model': 'structured-model',
+        'base_url': 'https://api.example.com/v1',
+        'api_key_encrypted': encrypt_secret('not-a-real-key'),
+    }
+    result = await llm.complete_with_schema(
+        provider, 'Design a contract', 'Return the proposal',
+        {'type': 'object', 'properties': {'product': {'type': 'object'}}}, 'forma_appspec',
+    )
+    assert result == {'product': {}}
+    response_format = FakeClient.calls[0]['json']['response_format']
+    assert response_format['type'] == 'json_schema'
+    assert response_format['json_schema']['strict'] is True
+    assert response_format['json_schema']['name'] == 'forma_appspec'
+
+
+@pytest.mark.asyncio
+async def test_json_schema_falls_back_for_compatible_providers(monkeypatch):
+    FakeClient.responses = [FakeResponse('unsupported', status=400), FakeResponse('{"product":{}}')]
+    FakeClient.calls = []
+    monkeypatch.setattr(httpx, 'AsyncClient', FakeClient)
+    provider = {
+        'name': 'Compatible provider', 'model': 'json-model',
+        'base_url': 'https://api.example.com/v1',
+        'api_key_encrypted': encrypt_secret('not-a-real-key'),
+    }
+    result = await llm.complete_with_schema(
+        provider, 'Design a contract', 'Return the proposal', {'type': 'object'}, 'forma_appspec',
+    )
+    assert result == {'product': {}}
+    assert len(FakeClient.calls) == 2
+    assert FakeClient.calls[0]['json']['response_format']['type'] == 'json_schema'
+    assert FakeClient.calls[1]['json']['response_format'] == {'type': 'json_object'}
