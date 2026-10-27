@@ -1,7 +1,9 @@
 # Forma Studio v1.4 — Implementation Tracker
 
-**Last updated:** 2026-10-27  
-**Current focus:** Milestone 3 complete — deferred BASE/JOB follow-ups are the next checkpoint
+**Last updated:** 2026-10-27
+
+**Current focus:** BASE-03A — fixture manifest and isolated loader (next slice; not started)
+
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
 This is the persistent implementation record for the approved sequence:
@@ -98,6 +100,90 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 
 **Deferred by design:** BASE-01 needs a baseline schema and generation-quality metrics; BASE-03 needs materialized fixtures. JOB-05 is resumable SSE rather than polling, JOB-06 still needs cancellation at every tool/process boundary, and JOB-07 still needs provider token/cost telemetry. These are deliberate follow-ups before specialist workers, not completed capabilities and not forgotten tasks.
 
+## Next checkpoint — BASE/JOB pre-specialist readiness
+
+**Checkpoint status:** `[ ]` In progress — BASE-01A is complete; BASE-03 is the next review slice.
+
+**Starting revision:** `a706e5a` (`Gate new releases with deterministic verification`).
+
+**Starting evidence:** 143 backend tests, 12 frontend unit tests, and 6 targeted browser journeys passed; production build and Ruff were clean.
+
+**Goal:** Close Milestones 0 and 1 before WRK-01. Establish reproducible quality evidence, safe attempt ownership, resumable progress, and complete provenance before work is divided among specialist workers. Do not enable specialist-worker behavior or change the release-gate semantics in this checkpoint.
+
+### Execution order and review slices
+
+1. **BASE-01A** — versioned baseline schema and capture contract.
+2. **BASE-03A–C** — reusable compatibility fixtures and their validation.
+3. **BASE-01B–C** — fixture-driven quality metrics, reproducibility, and baseline comparison.
+4. **JOB-06A–C** — cooperative cancellation, process cleanup, and guarded finalization.
+5. **JOB-05A–C** — ordered event replay, SSE delivery, UI reconnect, and polling fallback.
+6. **JOB-07A–D** — provider/build/runtime telemetry and owner-only usage visibility.
+
+The ID order is intentionally not the execution order. Fixtures supply BASE-01's quality corpus; cancellation defines terminal semantics before the event UI consumes them; telemetry instruments the finalized tool boundaries. Each numbered slice is independently reviewable and committable only after its focused tests and the full regression pass. Do not batch the entire checkpoint into one implementation commit.
+
+### BASE-01 — Reproducible evaluation baseline
+
+- [x] **BASE-01A — Versioned report contract.** `backend/app/evaluation/baseline.py` and the checked-in `baseline.schema.json` define the 1.1 report with revision, dirty-tree state, feature flags, Python/Node/platform metadata, fixture-pack provenance, and mandatory skip reasons. New captures write validated 1.1 documents with redacted metadata; existing 1.0 reports remain readable without fabricated fields. `--write-schema` and schema-drift tests keep the contract synchronized.
+- [ ] **BASE-01B — Deterministic generation-quality metrics.** Run an offline fixture corpus and record numerator, denominator, and rate for first-pass proposal validity, repair invocation, repair success, source/import validity, production-build success, runtime health, verification success, correct publish-gate decisions, and identical source/spec hashes on repeated compilation. Negative fixtures count as passes only when their expected rejection occurs. Do not use timing or external-provider availability as quality thresholds.
+- [ ] **BASE-01C — Repeatability and comparison.** Add a baseline comparison/check mode with explicit thresholds measured from the accepted fixture baseline, not invented target percentages. Two captures at the same revision and fixture version must produce identical semantic metrics after excluding timestamps and durations. Keep real-provider smoke evaluation opt-in and separate from the offline baseline.
+
+**Primary files:** `backend/scripts/capture_baseline.py`, `backend/tests/test_capture_baseline.py`, `backend/tests/evals/baseline.json`, and the new baseline model/schema plus deterministic evaluation runner.
+
+**Acceptance:** The checked-in baseline validates against the checked-in schema; repeated offline quality results are identical; regressions fail comparison with actionable case IDs; credentials, absolute workspace paths, and provider secrets are absent.
+
+### BASE-03 — Compatibility fixture pack
+
+- [ ] **BASE-03A — Manifest and isolated loader.** Add a versioned `backend/tests/fixtures/manifest.json` and loader that materializes projects, versions, artifacts, publication state, and provider responses into temporary user workspaces. Do not check in SQLite databases, dependency environments, caches, or production data. Preserve and reuse the existing `fixtures/appspec/item_manager.json` contract.
+- [ ] **BASE-03B — Declarative coverage matrix.** Materialize single-file/multi-file and static/FastAPI package sources, with current/historical and published/unpublished variants derived from shared bases rather than duplicated workspaces. Include valid and malformed provider responses for truncation, invalid JSON, invalid package structure, missing requirements, empty Python modules, native-fetch adaptation, invalid AppSpec contracts, and partial package overlays. Record expected outcomes and stable source/spec hashes.
+- [ ] **BASE-03C — Fixture validation and consumers.** Prove manifest completeness, hash stability, legacy/AppSpec compatibility, historical-version integrity, registry-only public lookup, migration behavior, and bounded malformed-output handling. Convert suitable inline test setup and BASE-01 quality cases to consume the same pack rather than creating another fixture system.
+
+**Primary files:** `backend/tests/fixtures/`, fixture-aware tests, and existing compatibility/workflow suites.
+
+**Acceptance:** A fresh checkout can materialize every declared case without reading `data/projects` or contacting a provider; all four architecture/source-format combinations and both publication/history states pass; malformed cases fail only for their documented reason.
+
+### JOB-06 — End-to-end cooperative cancellation
+
+- [ ] **JOB-06A — Attempt-scoped cancellation contract.** Introduce a job/attempt context that carries cancellation, trace, and tool ownership through the runner, engine, provider, build, runtime, and verifier boundaries. Add owner-checked `POST /api/projects/{project_id}/jobs/{job_id}/cancel`, expose the active job in project payloads, and make cancellation idempotent. Persist `cancel_requested`/`cancelling`/`cancelled` transitions; explicit cancellation must not trigger automatic retry.
+- [ ] **JOB-06B — Provider and process boundaries.** Check cancellation before and after async provider calls and between schema fallback/repair attempts. Replace duplicated subprocess waits with one bounded, redacting supervisor that races operation completion against cancellation and timeout. Cover npm, pip, venv creation, dependency probes, Playwright, runtime launch, and health waits. Terminate only the attempt-owned process group: graceful stop, bounded escalation, child reaping, and output-drain cleanup. Never stop an unrelated preview or an existing published runtime.
+- [ ] **JOB-06C — Finalization and UI safety.** Guard finalization with lease ownership, input hash, and cancellation state in one transaction. A cancelled attempt must not promote staging, create a version, finalize verification, or overwrite a release. Clean attempt-owned staging and temporary paths, emit exactly one terminal event, and preserve the last usable version. Add a busy-state cancel control with immediate `cancelling` feedback while polling remains available.
+
+**Primary files:** `backend/app/jobs/`, `backend/app/llm.py`, `backend/app/frontend_builder.py`, `backend/app/runtime.py`, `backend/app/verification/runner.py`, API schemas/routes, and Builder job controls.
+
+**Acceptance:** Fault-injection tests cancel at every model/npm/pip/browser/runtime/finalization boundary, including a finalization race and studio shutdown. Tests verify PID/process-group and listener cleanup, no new version or duplicate terminal event, intact published output, and unchanged legacy behavior with durable jobs disabled.
+
+### JOB-05 — Resumable event delivery
+
+- [ ] **JOB-05A — Versioned replay contract.** Define a project-scoped event envelope containing numeric `job_events.id`, job/attempt IDs, type, timestamp, and content-safe payload. Add owner-checked `GET /api/projects/{project_id}/events` using SSE over authenticated `fetch`; support `Last-Event-ID` and an equivalent initial cursor, bounded ordered replay, heartbeats, and terminal/project-refresh events. Do not put bearer tokens in URLs. Add lifecycle/progress dual-writes, including success, without removing historical event types or checkpoints.
+- [ ] **JOB-05B — Live delivery and reconnect.** Replay events with `id > cursor` in strict order, then tail persisted events without holding a SQLite connection across awaits. Return a pre-stream error for an invalid/expired cursor so the client can reconcile from a project snapshot. Add one abortable `useProjectEvents` subscription per mounted project, monotonic cursor tracking, bounded backoff, and immediate refresh on version/report/cancellation events. Close subscriptions on navigation, logout, completion, and shutdown.
+- [ ] **JOB-05C — Polling fallback and fault coverage.** Retain the existing polling path for legacy generation, unsupported streams, and stream failure; avoid overlapping poll/SSE refresh loops and duplicate versions/messages. Periodically reconcile the authoritative project payload even when SSE is healthy. Test replay across multiple jobs and attempts, reconnect after a dropped connection, cursor expiry, ownership isolation, heartbeat, offline fallback, shutdown cleanup, and deferred autopilot without duplicate versions.
+
+**Primary files:** `backend/app/jobs/service.py`, a new event stream service/route, `backend/app/jobs/runner.py`, `frontend/src/useProjectEvents.ts`, and Builder polling/integration tests.
+
+**Acceptance:** A browser that disconnects between checkpoints resumes from its last event ID with no lost or duplicated transitions; polling-only projects behave unchanged; no stream, timer, or server task remains after completion or navigation.
+
+### JOB-07 — Usage and provenance tracking
+
+- [ ] **JOB-07A — Shared tool-run envelope.** Extract a reusable tool-run service from the verifier's existing writer. Record job/attempt ownership, tool name/version, input hash, redacted output reference, status, retry sequence, start/end/duration, and spec/source hashes. Give every provider HTTP request, build/install operation, runtime launch/health check, and verification process a distinct tool run; do not aggregate away repair or fallback attempts.
+- [ ] **JOB-07B — Model usage and honest cost estimates.** Add an observed-completion adapter while retaining compatible generation wrappers. Capture provider, model, provider request ID, finish reason, schema fallback/repair reason, latency, and reported prompt/completion/total tokens per request. Missing usage is `unavailable`, never zero. Add optional configured input/output prices per million tokens and currency; snapshot prices with the usage row, label computed values as estimates, and report unpriced cost as unknown rather than `$0`. Forma Local must not fabricate token or cost data.
+- [ ] **JOB-07C — Build/runtime provenance.** Instrument dependency resolution/install, Vite builds, staging/promotion, runtime startup/health, and verification with durations, retries, cache hits, package/input hashes, source/spec hashes, environment/tool versions, and terminal status. Redact credentials, prompt bodies, access tokens, URL query strings, and private index credentials. Preserve existing verification reports and historical records.
+- [ ] **JOB-07D — Owner-only inspection and aggregation.** Add `GET /api/projects/{project_id}/usage` and a read-only Activity view for per-job and project totals, token availability, estimated/unknown cost, retries, tool durations, runtime health, and source/spec provenance. Test aggregation across attempts, cancelled-span closure, absent usage/pricing, legacy records, ownership checks, and secret scanning. Real-provider usage smoke remains opt-in.
+
+**Primary files:** `backend/app/llm.py`, the new shared tool-run service, provider configuration/schemas, build/runtime/verification instrumentation, `usage_ledger`, and an owner-only usage API/UI.
+
+**Acceptance:** Every completed, failed, or cancelled operation has one traceable terminal tool run; retries remain individually visible; aggregates equal their underlying rows; unknown token/cost data is explicit; no credential or prompt content appears in stored or returned telemetry.
+
+### Checkpoint exit gate for specialist workers
+
+- [ ] All BASE-01, BASE-03, JOB-05, JOB-06, and JOB-07 subtasks are complete, and the Milestone 0/1 gates are checked with dated evidence.
+- [ ] Two offline baseline captures are semantically identical, comparison detects an injected regression, and the complete fixture matrix passes from a fresh temporary workspace.
+- [ ] Cancellation/finalization fault tests leave no owned process, listener, staging directory, or duplicate finalization; existing published releases remain available.
+- [ ] SSE reconnect and polling fallback pass without event loss, duplicate project transitions, duplicate versions, or leaked subscriptions.
+- [ ] Model, build, runtime, and verification tool runs link to their job/attempt and source/spec hashes; token/cost availability and estimates are represented honestly with no secret leakage.
+- [ ] Full backend/frontend regressions, both architecture browser flows, release-gate tests, production build, and Ruff pass. Test servers and generated processes are stopped.
+- [ ] Update this tracker and README with actual evidence. WRK-01 may begin only after the user accepts this checkpoint; passing these tests does not automatically enable specialist workers.
+
+**Non-goals for this checkpoint:** WebSockets, a distributed event bus, automatic model-price discovery, budget enforcement, multi-worker orchestration, specialist-worker implementation, sandboxing, and preview/published data isolation remain separate work.
+
 ## Milestone 2 — AppSpec and deterministic compilation
 
 - [x] **SPEC-01 — Versioned schema.** Implemented in `backend/app/spec/types.py` and `schema.py`; schema and cross-contract tests pass.
@@ -161,3 +247,4 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 | 2026-10-27 | VER-02 verifier and report model | Nine verifier tests covering retries, coverage, failures, stale hashes, runtime, security, and Playwright; full regressions | 132 backend and 9 frontend unit tests passed; production build and lint clean |
 | 2026-10-27 | VER-03 deployment registry lookup | Registry write-through, backfill, no-scan lookup, migration/republication, and full regressions | 136 backend and 9 frontend unit tests passed; production build and lint clean |
 | 2026-10-27 | VER-04 release gate and Milestone 3 | Gate/API/deferred-error coverage, verification panel, full regressions, and desktop/mobile browser evidence | 143 backend and 12 frontend unit tests passed; 1 verification and 5 legacy browser journeys passed; production build and lint clean |
+| 2026-10-27 | BASE-01A versioned baseline contract | Seven focused baseline tests, schema generation/drift, legacy 1.0 parsing, real repository metadata, and full regressions | 147 backend and 12 frontend unit tests passed; production build and Ruff clean |

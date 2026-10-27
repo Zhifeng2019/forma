@@ -1,0 +1,269 @@
+{
+  "$defs": {
+    "Compatibility": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_modes": {
+          "items": {
+            "enum": [
+              "static",
+              "fastapi"
+            ],
+            "type": "string"
+          },
+          "title": "Backend Modes",
+          "type": "array"
+        },
+        "fixtures": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fixtures",
+          "type": "array"
+        },
+        "history_states": {
+          "items": {
+            "enum": [
+              "current",
+              "historical"
+            ],
+            "type": "string"
+          },
+          "title": "History States",
+          "type": "array"
+        },
+        "publish_states": {
+          "items": {
+            "enum": [
+              "published",
+              "unpublished"
+            ],
+            "type": "string"
+          },
+          "title": "Publish States",
+          "type": "array"
+        },
+        "source_formats": {
+          "items": {
+            "enum": [
+              "single-file",
+              "multi-file"
+            ],
+            "type": "string"
+          },
+          "title": "Source Formats",
+          "type": "array"
+        }
+      },
+      "required": [
+        "source_formats",
+        "backend_modes",
+        "publish_states",
+        "history_states",
+        "fixtures"
+      ],
+      "title": "Compatibility",
+      "type": "object"
+    },
+    "EnvironmentMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "machine": {
+          "minLength": 1,
+          "title": "Machine",
+          "type": "string"
+        },
+        "node_version": {
+          "minLength": 1,
+          "title": "Node Version",
+          "type": "string"
+        },
+        "python_version": {
+          "minLength": 1,
+          "title": "Python Version",
+          "type": "string"
+        },
+        "system": {
+          "minLength": 1,
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "python_version",
+        "node_version",
+        "system",
+        "machine"
+      ],
+      "title": "EnvironmentMetadata",
+      "type": "object"
+    },
+    "FeatureFlags": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_gate_v1": {
+          "title": "Acceptance Gate V1",
+          "type": "boolean"
+        },
+        "appspec_v1": {
+          "title": "Appspec V1",
+          "type": "boolean"
+        },
+        "durable_jobs_v1": {
+          "title": "Durable Jobs V1",
+          "type": "boolean"
+        },
+        "sandbox_v1": {
+          "title": "Sandbox V1",
+          "type": "boolean"
+        },
+        "specialist_workers_v1": {
+          "title": "Specialist Workers V1",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "durable_jobs_v1",
+        "appspec_v1",
+        "acceptance_gate_v1",
+        "specialist_workers_v1",
+        "sandbox_v1"
+      ],
+      "title": "FeatureFlags",
+      "type": "object"
+    },
+    "SuiteResult": {
+      "additionalProperties": false,
+      "properties": {
+        "duration_ms": {
+          "minimum": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "failed": {
+          "minimum": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "passed": {
+          "minimum": 0,
+          "title": "Passed",
+          "type": "integer"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "passed",
+        "failed",
+        "duration_ms"
+      ],
+      "title": "SuiteResult",
+      "type": "object"
+    },
+    "SuiteResults": {
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/SuiteResult"
+        },
+        "browser": {
+          "$ref": "#/$defs/SuiteResult"
+        },
+        "frontend_unit": {
+          "$ref": "#/$defs/SuiteResult"
+        },
+        "provider_smoke": {
+          "$ref": "#/$defs/SuiteResult"
+        }
+      },
+      "required": [
+        "backend",
+        "frontend_unit",
+        "browser",
+        "provider_smoke"
+      ],
+      "title": "SuiteResults",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Current capture contract with explicit reproducibility provenance.",
+  "properties": {
+    "captured_at": {
+      "format": "date-time",
+      "title": "Captured At",
+      "type": "string"
+    },
+    "compatibility": {
+      "$ref": "#/$defs/Compatibility"
+    },
+    "dirty_tree": {
+      "title": "Dirty Tree",
+      "type": "boolean"
+    },
+    "environment": {
+      "$ref": "#/$defs/EnvironmentMetadata"
+    },
+    "feature_flags": {
+      "$ref": "#/$defs/FeatureFlags"
+    },
+    "fixture_pack_version": {
+      "minLength": 1,
+      "title": "Fixture Pack Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "minLength": 1,
+      "title": "Source",
+      "type": "string"
+    },
+    "source_revision": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Source Revision",
+      "type": "string"
+    },
+    "suites": {
+      "$ref": "#/$defs/SuiteResults"
+    }
+  },
+  "required": [
+    "captured_at",
+    "source",
+    "suites",
+    "compatibility",
+    "schema_version",
+    "source_revision",
+    "dirty_tree",
+    "feature_flags",
+    "environment",
+    "fixture_pack_version"
+  ],
+  "title": "BaselineReport",
+  "type": "object"
+}

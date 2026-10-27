@@ -102,7 +102,14 @@ Regenerate the evaluation baseline with:
 cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/capture_baseline.py
 ```
 
-Use `--skip-browser` for a backend/frontend-only capture. Baseline output is written to `backend/tests/evals/baseline.json`.
+Use `--skip-browser` for a backend/frontend-only capture. Baseline output is written to `backend/tests/evals/baseline.json`. New captures use schema 1.1 and record source revision, dirty-tree state, feature flags, Python/Node/platform versions, and fixture-pack provenance without storing credentials or workspace paths. Existing 1.0 reports remain readable without inventing missing metadata.
+
+After changing the report contract, regenerate its checked-in JSON Schema and run the schema-drift test:
+
+```bash
+cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/capture_baseline.py --write-schema
+/Users/zhifengzhang/python_env/env_ai_build/bin/python -m pytest -q tests/test_capture_baseline.py
+```
 
 ## Tests
 

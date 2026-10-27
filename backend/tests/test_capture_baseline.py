@@ -5,7 +5,26 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.capture_baseline import BaselineError, capture, parse_metrics
+from app.evaluation.baseline import BaselineReport, LegacyBaselineReport, SuiteResult, parse_baseline
+from app.features import FeatureFlag
+from scripts.capture_baseline import (
+    FIXTURE_PACK_VERSION, BaselineError, capture, capture_metadata, parse_metrics,
+)
+
+
+def capture_context():
+    return {
+        'source_revision': 'a' * 40,
+        'dirty_tree': False,
+        'feature_flags': {flag.value: False for flag in FeatureFlag},
+        'environment': {
+            'python_version': '3.13.0',
+            'node_version': '22.0.0',
+            'system': 'TestOS',
+            'machine': 'test-architecture',
+        },
+        'fixture_pack_version': FIXTURE_PACK_VERSION,
+    }
 
 
 def test_parse_metrics_handles_pass_and_failure_summaries():
@@ -34,22 +53,71 @@ def test_capture_records_real_runner_results_and_compatibility():
             name = 'frontend_unit'
         return SimpleNamespace(returncode=0, stdout=summaries[name], stderr='')
 
-    result = capture(False, output, timeout=1, runner=fake_runner)
+    result = capture(False, output, timeout=1, runner=fake_runner, metadata=capture_context())
     assert result['suites']['backend']['passed'] == 17
     assert result['suites']['frontend_unit']['passed'] == 5
     assert result['suites']['browser']['passed'] == 5
     assert result['suites']['provider_smoke']['status'] == 'skipped'
     saved = json.loads(output.read_text())
-    assert saved['schema_version'] == '1.0'
+    assert saved['schema_version'] == '1.1'
+    assert saved['source_revision'] == 'a' * 40
+    assert saved['dirty_tree'] is False
+    assert saved['fixture_pack_version'] == FIXTURE_PACK_VERSION
+    assert set(saved['feature_flags']) == {flag.value for flag in FeatureFlag}
     assert saved['compatibility']['source_formats'] == ['single-file', 'multi-file']
+    assert isinstance(parse_baseline(saved), BaselineReport)
     assert len(calls) == 3
 
 
-def test_current_baseline_file_has_expected_shape():
+def test_current_baseline_file_remains_valid_legacy_document():
     path = Path(__file__).parent / 'evals' / 'baseline.json'
     if not path.exists():
         return
-    baseline = json.loads(path.read_text())
-    assert baseline['schema_version'] == '1.0'
-    assert {'backend', 'frontend_unit', 'browser', 'provider_smoke'} <= baseline['suites'].keys()
-    assert 'captured_at' in baseline and 'compatibility' in baseline
+    baseline = parse_baseline(json.loads(path.read_text()))
+    assert isinstance(baseline, LegacyBaselineReport)
+    assert baseline.schema_version == '1.0'
+    assert {'backend', 'frontend_unit', 'browser', 'provider_smoke'} <= baseline.suites.model_dump().keys()
+    assert baseline.captured_at.tzinfo is not None
+    assert baseline.compatibility.source_formats == ['single-file', 'multi-file']
+
+
+def test_checked_in_schema_matches_current_report_contract():
+    path = Path(__file__).parent / 'evals' / 'baseline.schema.json'
+    assert json.loads(path.read_text()) == BaselineReport.model_json_schema()
+
+
+def test_capture_metadata_is_complete_and_excludes_command_details():
+    def fake_runner(command, **_kwargs):
+        if command == ['git', 'rev-parse', 'HEAD']:
+            return SimpleNamespace(returncode=0, stdout='b' * 40 + '\n', stderr='')
+        if command == ['git', 'status', '--porcelain']:
+            return SimpleNamespace(returncode=0, stdout=' M doc/IMPLEMENTATION.md\n', stderr='')
+        if command == ['node', '--version']:
+            return SimpleNamespace(returncode=0, stdout='v22.14.0\n', stderr='')
+        raise AssertionError(command)
+
+    metadata = capture_metadata(runner=fake_runner)
+    assert metadata['source_revision'] == 'b' * 40
+    assert metadata['dirty_tree'] is True
+    assert metadata['environment']['node_version'] == '22.14.0'
+    assert set(metadata['feature_flags']) == {flag.value for flag in FeatureFlag}
+    assert all(type(value) is bool for value in metadata['feature_flags'].values())
+    serialized = json.dumps(metadata)
+    assert 'doc/IMPLEMENTATION.md' not in serialized
+    assert str(Path(__file__).resolve().parents[2]) not in serialized
+
+
+def test_baseline_rejects_unknown_versions_and_extra_fields():
+    with pytest.raises(ValueError, match='Unsupported baseline schema version'):
+        parse_baseline({'schema_version': '2.0'})
+    legacy = json.loads((Path(__file__).parent / 'evals' / 'baseline.json').read_text())
+    legacy['unexpected'] = True
+    with pytest.raises(ValueError):
+        parse_baseline(legacy)
+
+
+def test_skipped_suite_requires_an_explicit_reason():
+    with pytest.raises(ValueError, match='must include a reason'):
+        SuiteResult(status='skipped', passed=0, failed=0, duration_ms=0)
+    with pytest.raises(ValueError, match='Only a skipped suite'):
+        SuiteResult(status='passed', passed=1, failed=0, duration_ms=1, reason='not applicable')
