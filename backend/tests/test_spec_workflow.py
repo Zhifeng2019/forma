@@ -222,8 +222,9 @@ def test_deferred_durable_autopilot_writes_spec_for_every_version(monkeypatch):
         assert sorted(item['version'] for item in project['versions']) == [1, 2, 3]
         with workspace_db(account['user']['id']) as db:
             for path in SPEC_ARTIFACT_PATHS:
+                expected = 4 if path == 'appspec.json' else 3  # Review draft plus three built versions.
                 assert db.execute('SELECT COUNT(*) FROM artifacts WHERE project_id=? AND path=?',
-                                  (project_id, path)).fetchone()[0] == 3
+                                  (project_id, path)).fetchone()[0] == expected
             jobs = db.execute('SELECT status FROM generation_jobs WHERE project_id=?', (project_id,)).fetchall()
             assert len(jobs) == 6 and all(job['status'] == 'succeeded' for job in jobs)
         assert client.delete(f'/api/projects/{project_id}', headers=headers).status_code == 200

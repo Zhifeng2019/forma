@@ -12,8 +12,10 @@ from .frontend_builder import ensure_frontend_build
 from .source_packages import local_source_package, package_prompt, validate_source_package
 from .features import FeatureFlag, feature_enabled
 from .jobs.runner import run_generation_job
+from .spec.contract import entity_contract
+from .spec.generator import propose_appspec
 from .spec.legacy_adapter import legacy_appspec
-from .spec.schema import APPSPEC_PATH, SPEC_ARTIFACT_PATHS
+from .spec.schema import APPSPEC_PATH, SPEC_ARTIFACT_PATHS, appspec_document, parse_appspec
 from .spec.service import compile_legacy_package, generate_appspec_package, spec_artifacts
 
 STAGES = ['discovery', 'design', 'plan', 'build', 'review', 'deploy']
@@ -55,7 +57,7 @@ def generation_source_files(db, project_id: str, version: int) -> dict[str, str]
 
 
 def generation_appspec(db, project, version: int):
-    if version <= 0:
+    if version < 0:
         return None
     row = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?',
                      (project['id'], APPSPEC_PATH, version)).fetchone()
@@ -65,6 +67,17 @@ def generation_appspec(db, project, version: int):
     if not files:
         return None
     return legacy_appspec(project, files).model_dump(mode='json', exclude_none=True)
+
+
+async def review_appspec(db, project, provider, brief: str, feedback: str = ''):
+    spec = parse_appspec(await propose_appspec(
+        provider, project['name'], brief, project['source_format'], project['backend_mode'],
+        phase=1, feedback=feedback, current_spec=generation_appspec(db, project, 0),
+    ))
+    entity_contract(spec)
+    save_artifact(db, project['id'], 'plan', APPSPEC_PATH, appspec_document(spec), 0)
+    add_event(db, project['id'], 'AppSpec draft is ready for contract review')
+    return spec
 
 
 def compile_with_appspec(project, files: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
@@ -82,6 +95,13 @@ def provider_for_user(control, user_id):
     return dict(row) if row else None
 
 
+def assemble_source_package(current_files: dict[str, str], generated_files: dict[str, str]) -> dict[str, str]:
+    """Overlay model changes on the last complete package; never depend on partial file lists."""
+    if not isinstance(generated_files, dict):
+        raise GenerationError('The model must return a files object for the project package.')
+    return {**current_files, **generated_files}
+
+
 async def complete_package(
     provider: dict, name: str, brief: str, phase: int, feedback: str,
     backend_mode: str, current_files: dict[str, str],
@@ -89,7 +109,8 @@ async def complete_package(
     system = 'You are an expert React and FastAPI engineer. Generate a coherent multi-file project package.'
     result = await complete(provider, system, package_prompt(name, brief, phase, feedback, backend_mode, current_files))
     try:
-        return validate_source_package(result.get('files', {}), backend_mode, result.get('python_dependencies'))
+        files = assemble_source_package(current_files, result.get('files', {}))
+        return validate_source_package(files, backend_mode, result.get('python_dependencies'))
     except GenerationError as exc:
         adapter = str(result.get('files', {}).get('frontend/src/api.js', ''))[:4000]
         repair = package_prompt(name, brief, phase, feedback, backend_mode, current_files) + (
@@ -99,7 +120,8 @@ async def complete_package(
         )
         result = await complete(provider, system, repair)
         try:
-            return validate_source_package(result.get('files', {}), backend_mode, result.get('python_dependencies'))
+            files = assemble_source_package(current_files, result.get('files', {}))
+            return validate_source_package(files, backend_mode, result.get('python_dependencies'))
         except GenerationError as second_error:
             excerpt = str(result.get('files', {}).get('frontend/src/api.js', ''))[:500]
             available = ', '.join(result.get('files', {}).keys())[:1800]
@@ -212,6 +234,8 @@ async def _advance(
                     f'Product: {name}\nBrief: {brief}\nSelected architecture: {backend_mode}\nReturn {{"document":"markdown..."}} with exactly three implementation phases. Each phase must end in a shareable working page. For FastAPI apps, evolve the frontend and Python API together and include health and persistence checks.')
                 content = result.get('document', content)
             save_artifact(db, project_id, 'plan', 'plan.md', content, 0)
+            if feature_enabled(FeatureFlag.APPSPEC_V1):
+                await review_appspec(db, project, provider, brief)
             next_stage, index = 'build', 3
             message = 'The implementation is split into three shareable phases. Approve the plan to start building.'
         elif stage in {'build', 'review'}:
@@ -369,6 +393,11 @@ async def _revise_document(
             else:
                 content = artifact['content'] + f'\n\n## Revision direction\n{feedback}\n'
             save_artifact(db, project_id, artifact_stage, artifact_path, content, artifact['version'])
+            if artifact_stage == 'plan' and feature_enabled(FeatureFlag.APPSPEC_V1):
+                review_brief = project['brief'] + (
+                    f'\n\nAdditional product direction:\n{project["description"]}' if project['description'] else ''
+                )
+                await review_appspec(db, project, provider, review_brief, feedback)
             add_event(db, project_id, f'{artifact_path} revised from feedback', 'success')
             add_message(db, project_id, 'agent',
                         f'I’ve applied your feedback to `{artifact_path}` and carried the direction forward into the next stages.')
@@ -452,6 +481,10 @@ async def _migrate_architecture(
         if not version:
             db.execute('UPDATE projects SET backend_mode=?,backend_reason=?,status=?,updated_at=? WHERE id=?',
                        (target, reason, 'ready', now(), project_id))
+            if feature_enabled(FeatureFlag.APPSPEC_V1):
+                spec_project = dict(project)
+                spec_project['backend_mode'] = target
+                await review_appspec(db, spec_project, provider, brief, feedback)
             add_event(db, project_id, f'Architecture changed to {target} before the first build', 'success')
             add_message(db, project_id, 'agent',
                         f'Architecture updated to {target}. The next build will use this foundation.', 'stage',

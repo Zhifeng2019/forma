@@ -1,7 +1,7 @@
 # Forma Studio v1.4 — Implementation Tracker
 
 **Last updated:** 2026-10-27  
-**Current focus:** SPEC-06 — Optional AppSpec contract review
+**Current focus:** VER-01 — Generate deterministic acceptance checks from AppSpec
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
 This is the persistent implementation record for the approved sequence:
@@ -10,7 +10,22 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — SPEC-03 schema-aware generation
+## Latest completed increment — Deterministic package builds
+
+- [x] **Complete-source overlay.** Generated changes are applied to the previous complete package, preserving required components when model file lists are partial.
+- [x] **Relative-import validation.** Every import resolves before Vite, with missing-component and traversal errors reported before build or semantic repair.
+- [x] **Deterministic staging and promotion.** Builds use `versions/vN.staging`, promote only after success, clean failed staging, and preserve the last usable version. Backend runtimes consume promoted packages.
+- [x] **Cruto recovery and regression.** Versions 2 and 3 were rebuilt from complete existing sources with workspace backups; the full backend, frontend, runtime, and multi-file browser checks pass.
+
+## Earlier completed increment — SPEC-06 contract review
+
+- [x] **SPEC-06A — Pre-build draft.** Planning generates a validated AppSpec at version 0 before the first application build.
+- [x] **SPEC-06B — Feedback and compatibility.** Plan feedback and pre-build architecture changes revise the draft; the first build reuses it, and legacy/flag-off behavior remains intact.
+- [x] **SPEC-06C — Review API and invalid-contract gate.** Project payloads expose parsed metadata and schema/hash status; invalid drafts are rejected before approval or compilation.
+- [x] **SPEC-06D — Contract panel.** Product, entity, API, dependency, manifest, and acceptance sections are inspectable with responsive styling and an approval guard.
+- [x] **SPEC-06E — Verification.** Pre-build review, revision, invalid drafts, first-build reuse, component rendering, focused desktop/mobile browser flow, and full regressions pass.
+
+## Earlier completed increment — SPEC-03 schema-aware generation
 
 - [x] **SPEC-03A — Structured proposal transport.** Provider JSON Schema is supported with a structured-JSON compatibility fallback; existing truncation repair remains intact.
 - [x] **SPEC-03B — Proposal normalization and bounded repair.** Studio owns name, architecture, dependencies, and manifest policy. Valid JSON with an invalid contract receives exactly one semantic repair.
@@ -57,9 +72,9 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 - [x] **SPEC-03 — Schema-aware model generation.** Provider JSON Schema fallback, bounded semantic repair, deterministic source synthesis, and AppSpec-hash provenance are implemented; the flagged engine no longer requests free-form source maps.
 - [x] **SPEC-04 — Legacy adapter.** Existing artifacts are represented without regeneration or changes to preview/published URLs; all architecture/source-format combinations pass.
 - [x] **SPEC-05 — AppSpec generation integration.** Builds, refinements, and migrations compile from AppSpec and persist provenance; phase/version semantics and flag-off behavior pass.
-- [ ] **SPEC-06 — Optional contract review — Next.** Add an inspectable entity/API/dependency/acceptance view and prevent invalid specs from proceeding.
+- [x] **SPEC-06 — Contract review.** Pre-build drafts, revisions, review metadata, an inspectable Contract panel, and invalid-contract approval gates are implemented and verified.
 
-**Milestone gate:** `[ ]` The AppSpec generation contract is complete. Finish SPEC-06 contract review before closing Milestone 2.
+**Milestone gate:** `[x]` AppSpec is the generation contract when enabled, with pre-build review and deterministic source compilation. Legacy behavior remains available behind the flag.
 
 ## Milestone 3 — Deterministic verification and deployment registry
 
@@ -106,3 +121,6 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 | 2026-10-27 | Durable runner and engine integration | Complete backend regression and Ruff | 46 passed, including 15 durable-runner tests; lint clean |
 | 2026-10-27 | AppSpec compatibility slice | Complete backend regression, real Vite preview/archive, and Ruff | 83 passed, including 37 AppSpec-focused tests; lint clean |
 | 2026-10-27 | SPEC-03 schema-aware generation | Backend/frontend regressions, real Vite and FastAPI CRUD/restart, Ruff | 102 backend and 5 frontend tests passed; production build and lint clean |
+| 2026-10-27 | SPEC-06 contract review and Milestone 2 | Backend/frontend regressions, focused and legacy browser suites, production build, Ruff | 109 backend and 9 frontend unit tests passed; 1 AppSpec and 5 legacy browser tests passed; build and lint clean |
+| 2026-10-27 | Relative-import validation and Cruto repair | Import/repair regressions, complete backend/frontend checks, Cruto v2 Vite build and preview | 113 backend and 9 frontend unit tests passed; Cruto v2 is ready with HTTP 200 preview; workspace backup retained |
+| 2026-10-27 | Deterministic overlay and staged builds | Complete-source, staging, failure/promotion, full backend/frontend, and multi-file browser checks | 118 backend and 9 frontend unit tests plus 1 browser test passed; Cruto v3 reached review with HTTP 200 preview; backups retained |

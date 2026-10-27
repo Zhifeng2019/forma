@@ -34,16 +34,50 @@ def version_directory(project_id: str, version: int) -> Path:
     return settings.data_path / 'projects' / project_id / 'versions' / f'v{version}'
 
 
-def write_source_files(project_id: str, version: int, files: dict[str, str]) -> Path:
-    root = version_directory(project_id, version)
+def staging_directory(project_id: str, version: int) -> Path:
+    return version_directory(project_id, version).with_name(f'v{version}.staging')
+
+
+def _remove_tree(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def _assert_immutable_source(root: Path, files: dict[str, str]) -> None:
+    for relative, content in files.items():
+        target = safe_path(root, relative)
+        if target.exists() and target.read_text() != content:
+            raise PackageBuildError(f'Immutable version source differs at {relative}')
+
+
+def _write_source_tree(root: Path, files: dict[str, str]) -> Path:
     root.mkdir(parents=True, exist_ok=True)
+    _assert_immutable_source(root, files)
     for relative, content in files.items():
         target = safe_path(root, relative)
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists() and target.read_text() != content:
-            raise PackageBuildError(f'Immutable version source differs at {relative}')
         target.write_text(content)
     return root
+
+
+def write_source_files(project_id: str, version: int, files: dict[str, str]) -> Path:
+    return _write_source_tree(version_directory(project_id, version), files)
+
+
+def _promote_version(staging: Path, root: Path) -> None:
+    rejected = root.with_name(f'{root.name}.rejected')
+    _remove_tree(rejected)
+    if root.exists():
+        root.rename(rejected)
+    try:
+        staging.rename(root)
+    except Exception:
+        if rejected.exists() and not root.exists():
+            rejected.rename(root)
+        raise
+    _remove_tree(rejected)
 
 
 def _digest(files: dict[str, str]) -> str:
@@ -139,7 +173,7 @@ async def ensure_node_environment(user_id: int) -> Path:
 async def ensure_frontend_build(
     user_id: int, project_id: str, version: int, files: dict[str, str],
 ) -> str:
-    root = write_source_files(project_id, version, files)
+    root = version_directory(project_id, version)
     frontend = root / 'frontend'
     index = frontend / 'dist' / 'index.html'
     marker = frontend / 'dist' / '.forma-source.sha256'
@@ -150,20 +184,28 @@ async def ensure_frontend_build(
     async with _build_locks.setdefault(key, asyncio.Lock()):
         if index.exists() and marker.exists() and marker.read_text() == digest:
             return index.read_text()
-        node_root = await ensure_node_environment(user_id)
-        node, npm = _node_binaries()
-        shared_modules = node_root / 'node_modules'
-        local_modules = frontend / 'node_modules'
-        if local_modules.is_symlink():
-            local_modules.unlink()
-        elif local_modules.exists():
-            shutil.rmtree(local_modules)
-        local_modules.symlink_to(shared_modules, target_is_directory=True)
-        env = _environment(root, shared_modules, node)
-        await _run([npm, 'run', 'build'], frontend, env, settings.runtime_build_timeout, 'Frontend production build')
-        if not index.exists():
-            raise PackageBuildError('Vite completed without producing frontend/dist/index.html.')
-        marker.write_text(digest)
+        _assert_immutable_source(root, files)
+        staging = staging_directory(project_id, version)
+        _remove_tree(staging)
+        try:
+            node_root = await ensure_node_environment(user_id)
+            node, npm = _node_binaries()
+            shared_modules = node_root / 'node_modules'
+            _write_source_tree(staging, files)
+            staged_frontend = staging / 'frontend'
+            local_modules = staged_frontend / 'node_modules'
+            local_modules.symlink_to(shared_modules, target_is_directory=True)
+            env = _environment(staging, shared_modules, node)
+            await _run([npm, 'run', 'build'], staged_frontend, env,
+                       settings.runtime_build_timeout, 'Frontend production build')
+            staged_index = staged_frontend / 'dist' / 'index.html'
+            if not staged_index.exists():
+                raise PackageBuildError('Vite completed without producing frontend/dist/index.html.')
+            (staged_frontend / 'dist' / '.forma-source.sha256').write_text(digest)
+            _promote_version(staging, root)
+        except Exception:
+            _remove_tree(staging)
+            raise
         return index.read_text()
 
 

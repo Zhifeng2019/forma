@@ -13,6 +13,8 @@ from .backend_engine import BACKEND_PATH, REQUIREMENTS_PATH
 from .config import settings
 from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manager
 from .frontend_builder import PackageBuildError, deployment_archive, ensure_frontend_build, frontend_asset_path
+from .features import FeatureFlag, feature_enabled
+from .spec.review import appspec_review
 
 router = APIRouter(prefix='/api')
 _generation_jobs: dict[asyncio.Task, tuple[int, str]] = {}
@@ -208,6 +210,10 @@ def project_payload(user_id, project_id):
         artifacts = db.execute('''SELECT a.* FROM artifacts a JOIN (SELECT path,MAX(version) version FROM artifacts WHERE project_id=? GROUP BY path) latest
                                   ON a.path=latest.path AND a.version=latest.version WHERE a.project_id=? ORDER BY a.path''', (project_id, project_id))
         result['artifacts'] = rows(artifacts)
+        spec = db.execute('''SELECT content FROM artifacts WHERE project_id=? AND path='appspec.json'
+            ORDER BY version DESC LIMIT 1''', (project_id,)).fetchone()
+        result.update(appspec_review(spec['content'] if spec else None))
+        result['appspec_enabled'] = feature_enabled(FeatureFlag.APPSPEC_V1)
         result['published_url'] = f'/apps/{project_id}/' if result['published_version'] else None
         return result
 
@@ -271,6 +277,13 @@ async def advance_project(project_id: str, body: StageInput, user=Depends(curren
         raise HTTPException(409, 'The agent is already working')
     if project['stage'] == 'deploy':
         return project_payload(user['id'], project_id)
+    if feature_enabled(FeatureFlag.APPSPEC_V1) and project['stage'] == 'build' and not project['current_version']:
+        with workspace_db(user['id']) as db:
+            spec = db.execute('''SELECT content FROM artifacts WHERE project_id=? AND path='appspec.json'
+                ORDER BY version DESC LIMIT 1''', (project_id,)).fetchone()
+        review = appspec_review(spec['content'] if spec else None, for_compilation=True)
+        if review['appspec_valid'] is False:
+            raise HTTPException(409, f'AppSpec requires correction before building: {review["appspec_error"]}')
     with control_db() as db:
         from .engine import provider_for_user
         provider = provider_for_user(db, user['id'])
@@ -296,7 +309,10 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
         provider = provider_for_user(db, user['id'])
 
     async def run_message() -> None:
-        if project['stage'] in {'build', 'review'}:
+        builds_application = project['stage'] in {'build', 'review'} and (
+            project['current_version'] > 0 or not feature_enabled(FeatureFlag.APPSPEC_V1)
+        )
+        if builds_application:
             await generate_stage(user['id'], project_id, provider, body.content + selection, revise=True)
         else:
             await revise_document(user['id'], project_id, provider, body.content)

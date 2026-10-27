@@ -8,7 +8,72 @@ from fastapi.testclient import TestClient
 from app.backend_engine import GenerationError, has_forma_api, reviewed_requirements
 from app.main import app
 from app.engine import complete_package
-from app.source_packages import local_source_package
+from app.source_packages import local_source_package, validate_source_package
+
+
+def test_relative_component_imports_resolve_with_or_without_extensions():
+    files = local_source_package('Import Check', 'Validate component imports', 1, 'fastapi')
+    files['frontend/src/components/Auth.jsx'] = 'export default function Auth() { return null }\n'
+    files['frontend/src/components/Workspace.jsx'] = "import Auth from './Auth'\n" + files['frontend/src/components/Workspace.jsx']
+    validated = validate_source_package(files, 'fastapi')
+    assert 'frontend/src/components/Auth.jsx' in validated
+
+
+def test_missing_component_import_is_rejected_before_vite():
+    files = local_source_package('Import Check', 'Reject missing components', 1, 'fastapi')
+    files['frontend/src/components/Workspace.jsx'] = "import Auth from './Auth.jsx'\n" + files['frontend/src/components/Workspace.jsx']
+    with pytest.raises(GenerationError, match='imports missing source file: ./Auth.jsx'):
+        validate_source_package(files, 'fastapi')
+
+
+def test_relative_import_cannot_leave_frontend_source():
+    files = local_source_package('Import Check', 'Reject source traversal', 1, 'fastapi')
+    files['frontend/src/components/Workspace.jsx'] = "import Bad from '../../backend/app/api.py'\n" + files['frontend/src/components/Workspace.jsx']
+    with pytest.raises(GenerationError, match='outside the frontend source folder'):
+        validate_source_package(files, 'fastapi')
+
+
+@pytest.mark.asyncio
+async def test_missing_component_gets_one_semantic_repair(monkeypatch):
+    calls = []
+
+    async def fake_complete(_provider, _system, prompt):
+        calls.append(prompt)
+        files = local_source_package('Repair Check', 'A shared repair workspace', 1, 'fastapi')
+        if len(calls) == 1:
+            files['frontend/src/components/Workspace.jsx'] = (
+                "import Auth from './Auth.jsx'\n" + files['frontend/src/components/Workspace.jsx']
+            )
+        return {'files': files}
+
+    monkeypatch.setattr('app.engine.complete', fake_complete)
+    files = await complete_package({}, 'Repair Check', 'A shared repair workspace', 1, '', 'fastapi', {})
+    assert len(calls) == 2
+    assert 'imports missing source file' in calls[1]
+    assert 'frontend/src/App.jsx' in files
+
+
+@pytest.mark.asyncio
+async def test_partial_update_preserves_previous_components(monkeypatch):
+    previous = local_source_package('Overlay Check', 'Preserve complete source', 1, 'fastapi')
+    previous['frontend/src/components/Auth.jsx'] = 'export default function Auth() { return null }\n'
+    previous['frontend/src/components/Market.jsx'] = 'export default function Market() { return null }\n'
+    previous['frontend/src/components/Workspace.jsx'] = (
+        "import Auth from './Auth.jsx'\nimport Market from './Market.jsx'\n"
+        + previous['frontend/src/components/Workspace.jsx']
+    )
+    calls = []
+
+    async def fake_complete(_provider, _system, prompt):
+        calls.append(prompt)
+        return {'files': {'frontend/src/components/Workspace.jsx': previous['frontend/src/components/Workspace.jsx'] + '// Phase 2\n'}}
+
+    monkeypatch.setattr('app.engine.complete', fake_complete)
+    files = await complete_package({}, 'Overlay Check', 'Preserve complete source', 2, '', 'fastapi', previous)
+    assert len(calls) == 1
+    assert 'frontend/src/components/Auth.jsx' in files
+    assert 'frontend/src/components/Market.jsx' in files
+    assert files['frontend/src/components/Workspace.jsx'].endswith('// Phase 2\n')
 
 
 def auth(token):

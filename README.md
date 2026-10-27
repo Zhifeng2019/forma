@@ -59,6 +59,8 @@ versions/vN/
 
 The agent validates source files and reviewed dependencies, runs `vite build`, and marks the version ready only after `frontend/dist/index.html` exists. One shared Node environment per user supplies locked React, React DOM, Lucide, Vite, and React-plugin packages. Forma generates `backend/requirements.txt` from the reviewed `python_dependencies` list rather than requiring it from the model. Python environments remain app-specific and support the base FastAPI stack plus reviewed `httpx`, `PyJWT`, `cryptography`, `pydantic-settings`, `python-multipart`, and `SQLAlchemy` packages.
 
+Generated changes are overlaid on the previous complete package, so partial model file lists cannot remove required components. Relative imports are resolved before building. Each version is materialized in `versions/vN.staging`; only a validated, successful production build is promoted to `versions/vN`. Failed builds remove staging and preserve the last usable version. Backend runtimes consume only the promoted, versioned package.
+
 The Source tab displays current-version files. Deployment downloads include frontend source, production `frontend/dist/`, and backend modules, excluding dependency folders, caches, and temporary files. Preview and public hosting serve the built output and its assets. Both `Forma.api` and native same-origin `/api/...` fetch calls are routed through the runtime bridge. Invalid model packages receive one bounded semantic regeneration.
 
 ## Generated FastAPI runtime
@@ -81,7 +83,8 @@ The v1.4 work is additive and disabled by default. Task status and acceptance ev
 - The durable runner supports idempotent jobs, attempts, checkpoints, heartbeat, cancellation, retry, and stale-finalization protection for stage generation, document revision, and architecture migration.
 - AppSpec v1 provides schema-aware provider proposals with a structured-JSON fallback, one bounded semantic repair, a typed contract, deterministic single-entity CRUD source synthesis, and a legacy adapter.
 - With `APPSPEC_V1` enabled, builds, refinements, and migrations compile from AppSpec and persist `appspec.json` plus `build-manifest.json`. The v1 compiler supports one entity and reviewed collection CRUD routes; flag-off behavior preserves the existing generators.
-- Optional contract review, broader multi-entity synthesis, resumable SSE, full tool telemetry, deterministic release gates, specialist workers, and sandboxing remain separate tracked tasks.
+- Planning creates a version-0 AppSpec draft for the Contract review panel. Plan feedback and pre-build architecture changes revise the draft, and invalid contracts are blocked before compilation.
+- Broader multi-entity synthesis, resumable SSE, full tool telemetry, deterministic release gates, specialist workers, and sandboxing remain separate tracked tasks.
 
 Regenerate the evaluation baseline with:
 

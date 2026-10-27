@@ -118,13 +118,7 @@ def validate_source_package(
         raise GenerationError('frontend/index.html must contain id="root" and load /src/main.jsx as a module.')
     javascript = '\n'.join(content for path, content in normalized.items()
                            if path.startswith('frontend/src/') and path.endswith(('.js', '.jsx')))
-    for match in re.finditer(r'(?:from\s+|import\s*\(?\s*|require\s*\(\s*)["\']([^"\']+)["\']', javascript):
-        package = match.group(1)
-        if package.startswith('.'):
-            if package.startswith('../..'):
-                raise GenerationError(f'JavaScript import leaves its source folder: {package}')
-        elif package.split('/')[0] not in ALLOWED_JS_PACKAGES and not package.startswith('react-dom/'):
-            raise GenerationError(f'Unsupported JavaScript dependency: {package}')
+    _validate_javascript_imports(normalized)
     if backend_mode == 'fastapi' and not has_forma_api(javascript):
         raise GenerationError('The FastAPI frontend must call its API through Forma.api.')
     if backend_mode == 'static' and has_forma_api(javascript):
@@ -142,6 +136,47 @@ def validate_source_package(
         if 'from app.api import app' not in normalized['backend/main.py']:
             raise GenerationError('backend/main.py must expose app through `from app.api import app`.')
     return normalized
+
+
+def _relative_import_path(importer: str, package: str) -> PurePosixPath:
+    parts = []
+    for part in (PurePosixPath(importer).parent / package).parts:
+        if part == '..':
+            if not parts:
+                raise GenerationError(f'{importer} imports outside the frontend source folder: {package}')
+            parts.pop()
+        elif part not in {'', '.'}:
+            parts.append(part)
+    if len(parts) < 2 or parts[0] != 'frontend' or parts[1] != 'src':
+        raise GenerationError(f'{importer} imports outside the frontend source folder: {package}')
+    return PurePosixPath(*parts)
+
+
+def _validate_javascript_imports(files: dict[str, str]) -> None:
+    pattern = r'(?:from\s+|import\s*\(?\s*|require\s*\(\s*)["\']([^"\']+)["\']'
+    for importer, source in files.items():
+        if not importer.startswith('frontend/src/') or not importer.endswith(('.js', '.jsx')):
+            continue
+        for match in re.finditer(pattern, source):
+            package = match.group(1)
+            if not package.startswith('.'):
+                if package.split('/')[0] not in ALLOWED_JS_PACKAGES and not package.startswith('react-dom/'):
+                    raise GenerationError(f'Unsupported JavaScript dependency: {package}')
+                continue
+            target = _relative_import_path(importer, package)
+            if target.suffix not in {'', '.js', '.jsx', '.css'}:
+                raise GenerationError(f'{importer} imports unsupported source type: {package}')
+            target_string = str(target)
+            candidates = [target_string]
+            if not target.suffix:
+                candidates.extend([
+                    f'{target_string}.js', f'{target_string}.jsx',
+                    f'{target_string}/index.js', f'{target_string}/index.jsx',
+                ])
+            if not any(candidate in files for candidate in candidates):
+                raise GenerationError(
+                    f'{importer} imports missing source file: {package}. Resolved to {target_string}.'
+                )
 
 
 def _validate_python(source: str, path: str) -> None:
