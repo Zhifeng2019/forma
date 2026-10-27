@@ -1,8 +1,8 @@
 # Forma Studio v1.4 — Implementation Tracker
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
-**Current focus:** BASE-03C — fixture validation and consumer integration (next slice; not started)
+**Current focus:** BASE-01B — deterministic generation-quality metrics (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -80,11 +80,11 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 
 ## Milestone 0 — Baseline and compatibility
 
-- [ ] **BASE-01 — Reproducible evaluation baseline — Partial.** `backend/scripts/capture_baseline.py` and `backend/tests/evals/baseline.json` record real suite results. Add the checked-in baseline schema and generation-quality metrics before acceptance.
+- [ ] **BASE-01 — Reproducible evaluation baseline — Partial.** The 1.1 schema, provenance capture, legacy reader, and schema-drift tests are complete. Fixture-driven generation-quality metrics, repeatability, and baseline comparison remain open.
 - [x] **BASE-02 — Typed feature flags.** `backend/app/features.py`, settings, `.env.example`, and `backend/tests/test_features.py`; every flag defaults off and invalid booleans are rejected.
-- [ ] **BASE-03 — Compatibility fixture pack — Partial.** Baseline categories cover source format, architecture, publication, history, and malformed outputs. Materialize the reusable project/provider/package fixture directories.
+- [x] **BASE-03 — Compatibility fixture pack.** Versioned checksum-linked project/provider/package fixtures cover all architecture, history, and publication combinations, with isolated materialization and real consumer integration.
 
-**Milestone gate:** `[ ]` Baseline schema, generation-quality metrics, and reusable fixtures remain open.
+**Milestone gate:** `[ ]` Generation-quality metrics, repeatability, and baseline comparison remain open; the fixture pack is complete.
 
 ## Milestone 1 — Durable job orchestration
 
@@ -102,7 +102,7 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 
 ## Next checkpoint — BASE/JOB pre-specialist readiness
 
-**Checkpoint status:** `[ ]` In progress — BASE-01A and BASE-03A/B are complete; BASE-03C is the next review slice.
+**Checkpoint status:** `[ ]` In progress — BASE-01A and BASE-03 are complete; BASE-01B/C are the next review slices.
 
 **Starting revision:** `a706e5a` (`Gate new releases with deterministic verification`).
 
@@ -135,7 +135,7 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 
 - [x] **BASE-03A — Manifest and isolated loader.** The versioned `backend/tests/fixtures/manifest.json` links checksum-validated AppSpec, project/version/artifact, publication, and provider resources. `FixturePack` materializes them only into explicit empty or marker-approved absolute temporary workspaces, reuses the existing Item Manager AppSpec, and rejects unsafe directories, non-canonical paths, duplicate projects, and checksum mismatches before fixture data is written. No SQLite databases, dependency environments, caches, or production data are checked in.
 - [x] **BASE-03B — Declarative coverage matrix.** Four package bases cover static/FastAPI and single-file/multi-file sources. Sixteen variants cover current/historical and published/unpublished states using shared React sources, replaceable API adapters, and a modular FastAPI backend. Nine provider fixtures declare acceptance, normalization, bounded repair, rejection, or overlay expectations for valid and malformed outputs. Resource checksums, stable package source hashes, and the normalized Item Manager AppSpec hash are verified; both multi-file packages pass the real source-package validator.
-- [ ] **BASE-03C — Fixture validation and consumers.** Prove manifest completeness, hash stability, legacy/AppSpec compatibility, historical-version integrity, registry-only public lookup, migration behavior, and bounded malformed-output handling. Convert suitable inline test setup and BASE-01 quality cases to consume the same pack rather than creating another fixture system.
+- [x] **BASE-03C — Fixture validation and consumers.** AppSpec schema/compiler, all four legacy-adapter cases, LLM repair, package overlay, invalid-package repair, and requirements normalization now consume the shared pack. Six integration tests verify historical preview/public output, owner-only registry reads, real Vite builds, single-file and modular FastAPI health/CRUD, bidirectional migration with release preservation, and the remaining provider boundaries. Manifest/hash checks and real source validation complete the reusable fixture contract for the later BASE-01 quality runner.
 
 **Primary files:** `backend/tests/fixtures/`, fixture-aware tests, and existing compatibility/workflow suites.
 
@@ -250,3 +250,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-27 | BASE-01A versioned baseline contract | Seven focused baseline tests, schema generation/drift, legacy 1.0 parsing, real repository metadata, and full regressions | 147 backend and 12 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-27 | BASE-03A fixture manifest and isolated loader | Six loader tests covering materialization, historical publication, providers, traversal, checksums, and unsafe-directory refusal; full regressions | 153 backend and 12 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-27 | BASE-03B compatibility coverage matrix | Five matrix tests plus existing fixture/baseline tests; all 16 variants materialized, source/AppSpec hashes and nine provider expectations verified, multi-file source validation and full regressions | 158 backend and 12 frontend unit tests passed; production build and Ruff clean |
+| 2026-10-28 | BASE-03C fixture validation and consumers | Six integration tests plus converted AppSpec/adapter/provider consumers; real Vite builds, FastAPI health/CRUD, history, registry, migration, and full regressions | 164 backend and 12 frontend unit tests passed; production build and Ruff clean |

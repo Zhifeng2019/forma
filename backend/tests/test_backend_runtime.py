@@ -1,3 +1,4 @@
+import json
 import subprocess
 import time
 import pytest
@@ -45,7 +46,9 @@ def test_architecture_recommendation_and_source_policy():
 
 
 def test_legacy_requirements_gain_email_support_once():
-    legacy = '\n'.join(default_requirements().splitlines()[:3]) + '\n'
+    from fixtures.loader import FixturePack
+    pack = FixturePack()
+    legacy = json.loads(pack.read_resource(pack.manifest.providers['missing-requirements']))['files']['requirements.txt']
     enriched = runtime_requirements(legacy)
     assert enriched.count('email-validator==') == 1
     assert runtime_requirements(enriched) == enriched

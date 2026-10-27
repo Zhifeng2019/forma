@@ -115,6 +115,8 @@ Compatibility fixtures are declared in `backend/tests/fixtures/manifest.json` wi
 
 `FixturePack` materializes project versions, artifacts, publication state, and provider responses only into an explicit empty or marker-approved absolute temporary workspace. The loader refuses application data directories, unmarked nonempty directories, and non-canonical paths; resource checksum mismatches fail before project or provider data is materialized. Multi-file fixture sources also pass the studio's real source-package validator.
 
+The AppSpec schema/compiler, legacy adapter, LLM repair, package-overlay, and requirements-normalization tests consume the same pack. Integration coverage exercises real Vite builds, single-file and modular FastAPI health/CRUD, historical preview/public output, owner-scoped registry reads, bidirectional migration, and bounded malformed-output handling.
+
 ## Tests
 
 ```bash

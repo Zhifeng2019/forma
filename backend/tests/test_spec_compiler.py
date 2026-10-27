@@ -1,6 +1,4 @@
 import copy
-import json
-from pathlib import Path
 
 import pytest
 
@@ -9,12 +7,11 @@ from app.llm import GenerationError
 from app.source_packages import frontend_package_json, local_source_package
 from app.spec.compiler import compile_package
 from app.spec.schema import AppSpecError, parse_appspec
-
-FIXTURE = Path(__file__).parent / 'fixtures' / 'appspec' / 'item_manager.json'
+from fixtures.loader import FixturePack
 
 
 def fixture_document() -> dict:
-    return json.loads(FIXTURE.read_text())
+    return FixturePack().appspec('item-manager')
 
 
 def source_files() -> dict[str, str]:

@@ -1,4 +1,5 @@
 import io
+import json
 import re
 import zipfile
 
@@ -9,6 +10,9 @@ from app.backend_engine import GenerationError, has_forma_api, reviewed_requirem
 from app.main import app
 from app.engine import complete_package
 from app.source_packages import local_source_package, validate_source_package
+from fixtures.loader import FixturePack
+
+PACK = FixturePack()
 
 
 def test_relative_component_imports_resolve_with_or_without_extensions():
@@ -66,7 +70,9 @@ async def test_partial_update_preserves_previous_components(monkeypatch):
 
     async def fake_complete(_provider, _system, prompt):
         calls.append(prompt)
-        return {'files': {'frontend/src/components/Workspace.jsx': previous['frontend/src/components/Workspace.jsx'] + '// Phase 2\n'}}
+        partial = json.loads(PACK.read_resource(PACK.manifest.providers['partial-package-overlay']))['files']
+        partial['frontend/src/components/Workspace.jsx'] += '// Phase 2\n'
+        return {'files': partial}
 
     monkeypatch.setattr('app.engine.complete', fake_complete)
     files = await complete_package({}, 'Overlay Check', 'Preserve complete source', 2, '', 'fastapi', previous)
@@ -112,7 +118,7 @@ async def test_invalid_model_package_gets_one_semantic_repair(monkeypatch):
     async def fake_complete(_provider, _system, prompt):
         calls.append(prompt)
         if len(calls) == 1:
-            return {'files': {}}
+            return json.loads(PACK.read_resource(PACK.manifest.providers['invalid-package-structure']))
         return {'files': local_source_package('Repair Check', 'A shared repair workspace', 1, 'fastapi')}
 
     monkeypatch.setattr('app.engine.complete', fake_complete)

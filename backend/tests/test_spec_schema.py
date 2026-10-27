@@ -1,16 +1,14 @@
 import copy
 import json
-from pathlib import Path
 
 import pytest
 
 from app.spec.schema import AppSpecError, appspec_document, appspec_hash, parse_appspec
-
-FIXTURE = Path(__file__).parent / 'fixtures' / 'appspec' / 'item_manager.json'
+from fixtures.loader import FixturePack
 
 
 def fixture_document() -> dict:
-    return json.loads(FIXTURE.read_text())
+    return FixturePack().appspec('item-manager')
 
 
 def test_versioned_schema_covers_the_complete_contract():

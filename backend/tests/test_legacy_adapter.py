@@ -2,30 +2,31 @@ import json
 
 import pytest
 
-from app.backend_engine import BACKEND_PATH, REQUIREMENTS_PATH, local_backend_html, local_backend_source, validate_application
 from app.config import Settings
 from app.features import FeatureDisabledError
-from app.local_engine import application_html
-from app.source_packages import local_source_package
 from app.spec.legacy_adapter import legacy_appspec
+from app.spec.manifest import normalize_source_files
 from app.spec.service import compile_legacy_package, spec_artifacts
+from fixtures.loader import FixturePack
 
 
 def legacy_package(source_format: str, backend_mode: str) -> tuple[dict, dict[str, str]]:
+    key = f'{backend_mode}-{"single" if source_format == "single-file" else "multi"}'
+    pack = FixturePack()
+    package = pack.manifest.packages[key]
     project = {
-        'name': 'Legacy Workspace',
-        'brief': 'Preserve this existing application without regeneration.',
+        'name': package.name,
+        'brief': package.brief,
         'backend_mode': backend_mode,
         'source_format': source_format,
     }
-    if source_format == 'multi-file':
-        return project, local_source_package(project['name'], project['brief'], 1, backend_mode)
-    if backend_mode == 'fastapi':
-        html, python, requirements = validate_application(
-            local_backend_html(project['name'], project['brief'], 1), local_backend_source(project['name']),
-        )
-        return project, {'index.html': html, BACKEND_PATH: python, REQUIREMENTS_PATH: requirements}
-    return project, {'index.html': application_html(project['name'], project['brief'], 1)}
+    files = normalize_source_files(pack.package_files(key), source_format)
+    normalized = {
+        path: (content.strip() if path == 'index.html' and source_format == 'single-file'
+               else content.strip() + '\n' if source_format == 'multi-file' else content)
+        for path, content in files.items()
+    }
+    return project, normalized
 
 
 @pytest.mark.parametrize('source_format', ['single-file', 'multi-file'])

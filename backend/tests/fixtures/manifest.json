@@ -24,11 +24,11 @@
       "brief": "A single-file frontend with a standalone FastAPI service.",
       "backend_mode": "fastapi",
       "source_format": "single-file",
-      "source_hash": "9ff4b760ffb6b582a1276f4b2919091afa8a72e45c39970de714af3ce2ab0cab",
+      "source_hash": "b6fd49d0b5e82a70cff1208709a95030d0599ebd72c118f4f636668ef9212a03",
       "artifacts": [
         {"path": "index.html", "source": "packages/fastapi-single/index.html", "sha256": "2b1c09ab1eceba5aaea7413b030f74232d93eb4b1144c7f6de1ae048a03f9edf"},
-        {"path": "main.py", "source": "packages/fastapi-single/main.py", "sha256": "c4ac8cd302ca271e9eafe122dd7db6e379a50432533180bbf568b83f95056d6f"},
-        {"path": "requirements.txt", "source": "packages/fastapi-single/requirements.txt", "sha256": "9cbbaef7b3f27e105928d8d94721b0963fca53e3f52600cebbfbb1c69a3f927f"}
+        {"path": "backend/main.py", "source": "packages/fastapi-single/main.py", "sha256": "c4ac8cd302ca271e9eafe122dd7db6e379a50432533180bbf568b83f95056d6f"},
+        {"path": "backend/requirements.txt", "source": "packages/fastapi-single/requirements.txt", "sha256": "9cbbaef7b3f27e105928d8d94721b0963fca53e3f52600cebbfbb1c69a3f927f"}
       ]
     },
     "static-multi": {
