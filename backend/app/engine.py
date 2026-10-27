@@ -51,7 +51,7 @@ def get_project(db, project_id):
 
 def generation_source_files(db, project_id: str, version: int) -> dict[str, str]:
     return {row['path']: row['content'] for row in db.execute(
-        'SELECT path,content FROM artifacts WHERE project_id=? AND version=? AND path NOT IN (?,?)',
+        "SELECT path,content FROM artifacts WHERE project_id=? AND version=? AND path NOT IN (?,?) AND path NOT LIKE 'acceptance/%'",
         (project_id, version, *SPEC_ARTIFACT_PATHS),
     )}
 

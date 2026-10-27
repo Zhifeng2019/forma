@@ -8,6 +8,7 @@ from .compiler import CompiledPackage, compile_package
 from .generator import propose_appspec
 from .legacy_adapter import legacy_appspec
 from .schema import APPSPEC_PATH, BUILD_MANIFEST_PATH, appspec_document
+from ..verification.manifest import acceptance_artifacts
 
 
 def compile_legacy_package(
@@ -38,7 +39,9 @@ async def generate_appspec_package(
 
 
 def spec_artifacts(compiled: CompiledPackage) -> dict[str, str]:
-    return {
+    artifacts = {
         APPSPEC_PATH: appspec_document(compiled.spec),
         BUILD_MANIFEST_PATH: json.dumps(compiled.manifest, indent=2, sort_keys=True, ensure_ascii=False) + '\n',
     }
+    artifacts.update(acceptance_artifacts(compiled))
+    return artifacts

@@ -44,7 +44,11 @@ def test_legacy_adapter_preserves_source_architecture_and_format(source_format, 
     assert compiled.files == original
     assert files == original
     artifacts = spec_artifacts(compiled)
-    assert set(artifacts) == {'appspec.json', 'build-manifest.json'}
+    assert set(artifacts) == {
+        'appspec.json', 'build-manifest.json', 'acceptance/api_tests.py',
+        'acceptance/browser_tests.spec.js', 'acceptance/security_tests.py',
+        'acceptance/migration_tests.py', 'acceptance/manifest.json',
+    }
     document = json.loads(artifacts['appspec.json'])
     manifest = json.loads(artifacts['build-manifest.json'])
     assert document['spec_hash'] == compiled.spec_hash

@@ -81,7 +81,8 @@ def _promote_version(staging: Path, root: Path) -> None:
 
 
 def _digest(files: dict[str, str]) -> str:
-    source = {path: content for path, content in files.items() if path not in SPEC_ARTIFACT_PATHS}
+    source = {path: content for path, content in files.items()
+              if path not in SPEC_ARTIFACT_PATHS and not path.startswith('acceptance/')}
     payload = json.dumps(source, sort_keys=True) + frontend_package_json() + frontend_vite_config() + 'vite-react-package-v1'
     return hashlib.sha256(payload.encode()).hexdigest()
 

@@ -84,6 +84,7 @@ The v1.4 work is additive and disabled by default. Task status and acceptance ev
 - AppSpec v1 provides schema-aware provider proposals with a structured-JSON fallback, one bounded semantic repair, a typed contract, deterministic single-entity CRUD source synthesis, and a legacy adapter.
 - With `APPSPEC_V1` enabled, builds, refinements, and migrations compile from AppSpec and persist `appspec.json` plus `build-manifest.json`. The v1 compiler supports one entity and reviewed collection CRUD routes; flag-off behavior preserves the existing generators.
 - Planning creates a version-0 AppSpec draft for the Contract review panel. Plan feedback and pre-build architecture changes revise the draft, and invalid contracts are blocked before compilation.
+- AppSpec versions include `acceptance/` artifacts: a provenance manifest plus executable API, browser, security, migration, and republishing checks with explicit environment requirements and mutation flags.
 - Broader multi-entity synthesis, resumable SSE, full tool telemetry, deterministic release gates, specialist workers, and sandboxing remain separate tracked tasks.
 
 Regenerate the evaluation baseline with:

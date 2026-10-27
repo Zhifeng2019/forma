@@ -65,10 +65,13 @@ def test_generation_dual_writes_only_when_enabled(monkeypatch, enabled, source_f
     }
     assert document['spec_hash'] == manifest['spec_hash']
     assert len(manifest['source_hash']) == 64
-    assert {item['path'] for item in manifest['files']} == set(files) - set(SPEC_ARTIFACT_PATHS)
+    expected_sources = {path for path in files if path not in SPEC_ARTIFACT_PATHS and not path.startswith('acceptance/')}
+    assert {item['path'] for item in manifest['files']} == expected_sources
+    assert 'acceptance/manifest.json' in files
     with workspace_db(user_id) as db:
         source = engine.generation_source_files(db, project_id, 1)
     assert not set(source) & set(SPEC_ARTIFACT_PATHS)
+    assert not any(path.startswith('acceptance/') for path in source)
 
 
 @pytest.mark.parametrize('source_format', ['single-file', 'multi-file'])
@@ -225,6 +228,11 @@ def test_deferred_durable_autopilot_writes_spec_for_every_version(monkeypatch):
                 expected = 4 if path == 'appspec.json' else 3  # Review draft plus three built versions.
                 assert db.execute('SELECT COUNT(*) FROM artifacts WHERE project_id=? AND path=?',
                                   (project_id, path)).fetchone()[0] == expected
+            for path in ('acceptance/manifest.json', 'acceptance/api_tests.py',
+                         'acceptance/browser_tests.spec.js', 'acceptance/security_tests.py',
+                         'acceptance/migration_tests.py'):
+                assert db.execute('SELECT COUNT(*) FROM artifacts WHERE project_id=? AND path=?',
+                                  (project_id, path)).fetchone()[0] == 3
             jobs = db.execute('SELECT status FROM generation_jobs WHERE project_id=?', (project_id,)).fetchall()
             assert len(jobs) == 6 and all(job['status'] == 'succeeded' for job in jobs)
         assert client.delete(f'/api/projects/{project_id}', headers=headers).status_code == 200
