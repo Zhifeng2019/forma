@@ -19,7 +19,7 @@ if str(ROOT / 'backend') not in sys.path:
 from app.evaluation.baseline import BaselineReport  # noqa: E402
 from app.features import FeatureFlag, feature_enabled  # noqa: E402
 
-FIXTURE_PACK_VERSION = 'inline-1'
+FIXTURE_PACK_VERSION = '1.0'
 COMPATIBILITY = {
     'source_formats': ['single-file', 'multi-file'],
     'backend_modes': ['static', 'fastapi'],

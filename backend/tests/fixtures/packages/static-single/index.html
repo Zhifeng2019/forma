@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Static fixture</title></head>
+<body><main><h1>Static fixture</h1><input id="item" aria-label="Item title"><button id="add">Add item</button><ul id="items"></ul></main>
+<script>
+const input=document.getElementById('item'),list=document.getElementById('items');
+const values=JSON.parse(localStorage.getItem('fixture-items')||'[]');
+function render(){list.replaceChildren(...values.map(value=>{const li=document.createElement('li');li.textContent=value;return li}));localStorage.setItem('fixture-items',JSON.stringify(values))}
+document.getElementById('add').onclick=()=>{if(input.value.trim()){values.push(input.value.trim());input.value='';render()}};render();
+</script></body></html>

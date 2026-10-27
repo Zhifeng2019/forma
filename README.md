@@ -111,7 +111,9 @@ cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/cap
 /Users/zhifengzhang/python_env/env_ai_build/bin/python -m pytest -q tests/test_capture_baseline.py
 ```
 
-Compatibility fixtures are declared in `backend/tests/fixtures/manifest.json` with resource checksums. `FixturePack` reads those checked-in resources and materializes project versions, artifacts, publication state, and provider responses only into an explicit empty or marker-approved absolute temporary workspace. The loader refuses application data directories, unmarked nonempty directories, and non-canonical paths; resource checksum mismatches fail before project or provider data is materialized.
+Compatibility fixtures are declared in `backend/tests/fixtures/manifest.json` with resource checksums. Four package bases cover static/FastAPI and single-file/multi-file architectures; shared React sources are extended with replaceable API adapters and a modular backend. Sixteen declarative variants cover current/historical and published/unpublished states, while nine provider fixtures record expected acceptance, normalization, bounded repair, rejection, or overlay handling. Stable package source hashes and normalized AppSpec hashes detect unintended fixture drift.
+
+`FixturePack` materializes project versions, artifacts, publication state, and provider responses only into an explicit empty or marker-approved absolute temporary workspace. The loader refuses application data directories, unmarked nonempty directories, and non-canonical paths; resource checksum mismatches fail before project or provider data is materialized. Multi-file fixture sources also pass the studio's real source-package validator.
 
 ## Tests
 

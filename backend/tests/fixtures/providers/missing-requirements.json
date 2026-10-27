@@ -1,0 +1,10 @@
+{
+  "name": "Legacy requirements",
+  "backend_mode": "fastapi",
+  "source_format": "single-file",
+  "files": {
+    "index.html": "<!doctype html><html><body>Legacy backend</body></html>",
+    "main.py": "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/api/health')\ndef health():\n    return {'status': 'ok'}\n",
+    "requirements.txt": "fastapi==0.139.0\n"
+  }
+}

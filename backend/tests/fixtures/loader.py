@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.database import CONTROL_SCHEMA, WORKSPACE_SCHEMA, connect
+from app.spec.schema import appspec_hash, parse_appspec
 
 FIXTURE_ROOT = Path(__file__).resolve().parent
 WORKSPACE_MARKER = '.forma-fixture-workspace'
@@ -113,27 +114,84 @@ class ProjectFixture(FixtureModel):
         return self
 
 
+class AppSpecFixture(Resource):
+    spec_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class PackageFixture(FixtureModel):
+    name: str = Field(min_length=1)
+    brief: str = Field(min_length=1)
+    backend_mode: Literal['static', 'fastapi']
+    source_format: Literal['single-file', 'multi-file']
+    extends: str | None = None
+    artifacts: list[ArtifactFixture] = []
+    source_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+    @model_validator(mode='after')
+    def unique_artifacts(self):
+        paths = [artifact.path for artifact in self.artifacts]
+        if len(paths) != len(set(paths)):
+            raise ValueError('Fixture package contains duplicate artifact paths')
+        if not self.artifacts and not self.extends:
+            raise ValueError('Fixture package must contain artifacts or extend a package')
+        return self
+
+
+class ProviderExpectation(FixtureModel):
+    category: Literal[
+        'valid-package', 'truncated-model-output', 'invalid-json', 'invalid-package-structure',
+        'missing-requirements', 'empty-python-init', 'native-fetch-adapter',
+        'invalid-appspec-contract', 'partial-package-overlay',
+    ]
+    handling: Literal['accept', 'repair-once', 'normalize', 'reject', 'overlay']
+
+
 class ProviderFixture(Resource):
     status_code: int = Field(default=200, ge=100, le=599)
     content_type: str = 'application/json'
+    expected: ProviderExpectation
+
+
+class ProjectVariant(FixtureModel):
+    key: str
+    project_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    package: str
+    history: Literal['current', 'historical']
+    publication: Literal['published', 'unpublished']
+
+    @field_validator('key')
+    @classmethod
+    def safe_key(cls, value: str) -> str:
+        if not _KEY_PATTERN.fullmatch(value):
+            raise ValueError('Fixture keys must contain lowercase letters, numbers, and hyphens')
+        return value
 
 
 class FixtureManifest(FixtureModel):
     schema_version: Literal['1.0']
     fixture_pack_version: str = Field(pattern=r'^[a-z0-9][a-z0-9.-]*$')
-    appspecs: dict[str, Resource]
+    appspecs: dict[str, AppSpecFixture]
+    packages: dict[str, PackageFixture]
     providers: dict[str, ProviderFixture]
     projects: list[ProjectFixture]
+    variants: list[ProjectVariant]
 
     @model_validator(mode='after')
     def unique_projects_and_keys(self):
-        for key in [*self.appspecs, *self.providers]:
+        for key in [*self.appspecs, *self.packages, *self.providers]:
             if not _KEY_PATTERN.fullmatch(key):
                 raise ValueError(f'Invalid fixture key: {key!r}')
-        keys = [project.key for project in self.projects]
-        project_ids = [project.project_id for project in self.projects]
+        for key, package in self.packages.items():
+            if package.extends and package.extends not in self.packages:
+                raise ValueError(f'Package {key} extends unknown package {package.extends}')
+        keys = [project.key for project in self.projects] + [variant.key for variant in self.variants]
+        project_ids = ([project.project_id for project in self.projects]
+                       + [variant.project_id for variant in self.variants])
         if len(keys) != len(set(keys)) or len(project_ids) != len(set(project_ids)):
             raise ValueError('Fixture projects must have unique keys and project IDs')
+        for variant in self.variants:
+            if variant.package not in self.packages:
+                raise ValueError(f'Variant {variant.key} references unknown package {variant.package}')
         return self
 
 
@@ -169,6 +227,56 @@ class FixturePack:
             raise FixtureError(f'Unable to load fixture manifest: {exc}') from exc
         self.fixture_pack_version = self.manifest.fixture_pack_version
         self.projects = {project.key: project for project in self.manifest.projects}
+        for variant in self.manifest.variants:
+            self._expand_variant(variant)
+
+    def package_artifacts(self, key: str, trail: tuple[str, ...] = ()) -> list[ArtifactFixture]:
+        if key in trail:
+            raise FixtureError(f'Fixture package inheritance contains a cycle: {key}')
+        try:
+            package = self.manifest.packages[key]
+        except KeyError as exc:
+            raise FixtureError(f'Unknown package fixture: {key}') from exc
+        inherited = self.package_artifacts(package.extends, (*trail, key)) if package.extends else []
+        merged = {artifact.path: artifact for artifact in inherited}
+        # Child packages may replace an adapter while retaining the shared base.
+        merged.update({artifact.path: artifact for artifact in package.artifacts})
+        return list(merged.values())
+
+    def package_files(self, key: str) -> dict[str, str]:
+        return {artifact.path: self.read_resource(artifact)
+                for artifact in sorted(self.package_artifacts(key), key=lambda artifact: artifact.path)}
+
+    def source_hash(self, key: str) -> str:
+        files = self.package_files(key)
+        actual = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
+        expected = self.manifest.packages[key].source_hash
+        if actual != expected:
+            raise FixtureError(f'Fixture package source hash mismatch: {key}')
+        return actual
+
+    def _expand_variant(self, variant: ProjectVariant) -> None:
+        package = self.manifest.packages[variant.package]
+        artifacts = self.package_artifacts(variant.package)
+        current_version = 2 if variant.history == 'historical' else 1
+        versions = [
+            VersionFixture(
+                version=number, label=f'Phase {number}',
+                note=f'{variant.history} / {variant.publication}',
+                backend_mode=package.backend_mode, source_format=package.source_format,
+                artifacts=artifacts,
+            )
+            for number in range(1, current_version + 1)
+        ]
+        self.projects[variant.key] = ProjectFixture(
+            key=variant.key, project_id=variant.project_id,
+            name=f'{package.name} — {variant.history} / {variant.publication}',
+            brief=package.brief, phase_index=current_version,
+            backend_mode=package.backend_mode, source_format=package.source_format,
+            current_version=current_version,
+            published_version=1 if variant.publication == 'published' else None,
+            versions=versions,
+        )
 
     def read_resource(self, resource: Resource) -> str:
         source = self.root.joinpath(*PurePosixPath(resource.source).parts).resolve()
@@ -188,9 +296,12 @@ class FixturePack:
         except KeyError as exc:
             raise FixtureError(f'Unknown AppSpec fixture: {key}') from exc
         try:
-            return json.loads(self.read_resource(resource))
+            document = json.loads(self.read_resource(resource))
         except json.JSONDecodeError as exc:
             raise FixtureError(f'AppSpec fixture is not valid JSON: {key}') from exc
+        if appspec_hash(parse_appspec(document)) != resource.spec_hash:
+            raise FixtureError(f'AppSpec fixture contract hash mismatch: {key}')
+        return document
 
     def workspace(self, data_dir: Path) -> 'FixtureWorkspace':
         return FixtureWorkspace(self, data_dir)
