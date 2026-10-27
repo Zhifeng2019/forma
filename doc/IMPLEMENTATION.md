@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-27
 
-**Current focus:** BASE-03A — fixture manifest and isolated loader (next slice; not started)
+**Current focus:** BASE-03B — declarative compatibility coverage matrix (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -102,7 +102,7 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 
 ## Next checkpoint — BASE/JOB pre-specialist readiness
 
-**Checkpoint status:** `[ ]` In progress — BASE-01A is complete; BASE-03 is the next review slice.
+**Checkpoint status:** `[ ]` In progress — BASE-01A and BASE-03A are complete; BASE-03B is the next review slice.
 
 **Starting revision:** `a706e5a` (`Gate new releases with deterministic verification`).
 
@@ -133,7 +133,7 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 
 ### BASE-03 — Compatibility fixture pack
 
-- [ ] **BASE-03A — Manifest and isolated loader.** Add a versioned `backend/tests/fixtures/manifest.json` and loader that materializes projects, versions, artifacts, publication state, and provider responses into temporary user workspaces. Do not check in SQLite databases, dependency environments, caches, or production data. Preserve and reuse the existing `fixtures/appspec/item_manager.json` contract.
+- [x] **BASE-03A — Manifest and isolated loader.** The versioned `backend/tests/fixtures/manifest.json` links checksum-validated AppSpec, project/version/artifact, publication, and provider resources. `FixturePack` materializes them only into explicit empty or marker-approved absolute temporary workspaces, reuses the existing Item Manager AppSpec, and rejects unsafe directories, non-canonical paths, duplicate projects, and checksum mismatches before fixture data is written. No SQLite databases, dependency environments, caches, or production data are checked in.
 - [ ] **BASE-03B — Declarative coverage matrix.** Materialize single-file/multi-file and static/FastAPI package sources, with current/historical and published/unpublished variants derived from shared bases rather than duplicated workspaces. Include valid and malformed provider responses for truncation, invalid JSON, invalid package structure, missing requirements, empty Python modules, native-fetch adaptation, invalid AppSpec contracts, and partial package overlays. Record expected outcomes and stable source/spec hashes.
 - [ ] **BASE-03C — Fixture validation and consumers.** Prove manifest completeness, hash stability, legacy/AppSpec compatibility, historical-version integrity, registry-only public lookup, migration behavior, and bounded malformed-output handling. Convert suitable inline test setup and BASE-01 quality cases to consume the same pack rather than creating another fixture system.
 
@@ -248,3 +248,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-27 | VER-03 deployment registry lookup | Registry write-through, backfill, no-scan lookup, migration/republication, and full regressions | 136 backend and 9 frontend unit tests passed; production build and lint clean |
 | 2026-10-27 | VER-04 release gate and Milestone 3 | Gate/API/deferred-error coverage, verification panel, full regressions, and desktop/mobile browser evidence | 143 backend and 12 frontend unit tests passed; 1 verification and 5 legacy browser journeys passed; production build and lint clean |
 | 2026-10-27 | BASE-01A versioned baseline contract | Seven focused baseline tests, schema generation/drift, legacy 1.0 parsing, real repository metadata, and full regressions | 147 backend and 12 frontend unit tests passed; production build and Ruff clean |
+| 2026-10-27 | BASE-03A fixture manifest and isolated loader | Six loader tests covering materialization, historical publication, providers, traversal, checksums, and unsafe-directory refusal; full regressions | 153 backend and 12 frontend unit tests passed; production build and Ruff clean |

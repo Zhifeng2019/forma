@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "fixture_pack_version": "inline-1",
+  "appspecs": {
+    "item-manager": {
+      "source": "appspec/item_manager.json",
+      "sha256": "f0ccc441f72923335dd1a4073586eb05f1d1eaece28ef98b14cb106d81a4af33"
+    }
+  },
+  "providers": {
+    "legacy-package": {
+      "source": "providers/legacy-package.json",
+      "sha256": "34ebdcfc27b114d9201dc42a8f436cad210b4f4b87be9fabe8c5c8aee3d65790",
+      "status_code": 200,
+      "content_type": "application/json"
+    }
+  },
+  "projects": [
+    {
+      "key": "static-history",
+      "project_id": "00000000000000000000000000000001",
+      "name": "Static History Fixture",
+      "brief": "A deterministic static application with a historical published version.",
+      "stage": "build",
+      "stage_index": 3,
+      "phase_index": 2,
+      "status": "ready",
+      "backend_mode": "static",
+      "source_format": "single-file",
+      "published_version": 1,
+      "current_version": 2,
+      "versions": [
+        {
+          "version": 1,
+          "label": "Phase 1",
+          "note": "Historical published fixture",
+          "backend_mode": "static",
+          "source_format": "single-file",
+          "artifacts": [
+            {
+              "path": "index.html",
+              "stage": "build",
+              "source": "packages/static-history/v1/index.html",
+              "sha256": "0bbad66496dae41806c3d09f29c2457fcee31c1f9be2a25dd44c832c459d0fa1"
+            }
+          ]
+        },
+        {
+          "version": 2,
+          "label": "Phase 2",
+          "note": "Current unpublished fixture",
+          "backend_mode": "static",
+          "source_format": "single-file",
+          "artifacts": [
+            {
+              "path": "index.html",
+              "stage": "build",
+              "source": "packages/static-history/v2/index.html",
+              "sha256": "2f22115ebad31ce74b4d568651461b0636d0984fd14191a6941ef9396f0d3821"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

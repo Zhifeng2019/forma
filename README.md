@@ -111,6 +111,8 @@ cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/cap
 /Users/zhifengzhang/python_env/env_ai_build/bin/python -m pytest -q tests/test_capture_baseline.py
 ```
 
+Compatibility fixtures are declared in `backend/tests/fixtures/manifest.json` with resource checksums. `FixturePack` reads those checked-in resources and materializes project versions, artifacts, publication state, and provider responses only into an explicit empty or marker-approved absolute temporary workspace. The loader refuses application data directories, unmarked nonempty directories, and non-canonical paths; resource checksum mismatches fail before project or provider data is materialized.
+
 ## Tests
 
 ```bash
