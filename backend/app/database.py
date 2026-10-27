@@ -154,19 +154,13 @@ def init_databases():
 
 
 def backfill_deployment_registry(user_id: int) -> None:
+    from .deployment_registry import upsert_deployment
     with workspace_db(user_id) as workspace:
-        projects = workspace.execute('''SELECT p.id,p.published_version,
-            COALESCE(v.backend_mode,p.backend_mode) backend_mode,
-            COALESCE(v.source_format,p.source_format) source_format
-            FROM projects p LEFT JOIN versions v ON v.project_id=p.id AND v.version=p.published_version
-            WHERE p.published_version IS NOT NULL''').fetchall()
-    with control_db() as control:
-        for project in projects:
-            control.execute('''INSERT OR IGNORE INTO deployment_registry(
-                project_id,user_id,published_version,backend_mode,source_format,runtime_metadata)
-                VALUES(?,?,?,?,?,?)''',
-                (project['id'], user_id, project['published_version'], project['backend_mode'],
-                 project['source_format'], '{}'))
+        project_ids = [row['id'] for row in workspace.execute(
+            'SELECT id FROM projects WHERE published_version IS NOT NULL',
+        )]
+    for project_id in project_ids:
+        upsert_deployment(user_id, project_id)
 
 
 def workspace_for(user_id: int):

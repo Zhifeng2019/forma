@@ -1,7 +1,7 @@
 # Forma Studio v1.4 — Implementation Tracker
 
 **Last updated:** 2026-10-27  
-**Current focus:** VER-03 — Deployment registry lookup
+**Current focus:** VER-04 — Gate new releases and expose verification
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
 This is the persistent implementation record for the approved sequence:
@@ -10,7 +10,15 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — VER-02 verifier and report model
+## Latest completed increment — VER-03 deployment registry lookup
+
+- [x] **Registry-only public lookup.** Public HTML, assets, and API routing resolve deployment metadata from the control-plane registry instead of scanning every user database.
+- [x] **Owner-scoped artifacts.** Published source is read only from the registered owner’s workspace and selected published version.
+- [x] **Write-through synchronization.** Publish, republish, unpublish, and project deletion update registry rows atomically with the existing workflow.
+- [x] **Backfill and version compatibility.** Backfill upgrades stale rows with version-specific architecture and source format; migration preserves the published deployment until explicit republication.
+- [x] **Verification evidence.** Registry write-through, backfill, no-scan lookup, migration, republication, and all existing public-hosting regressions pass.
+
+## Earlier completed increment — VER-02 verifier and report model
 
 - [x] **Durable verification jobs.** Idempotent verification, forced retry attempts, heartbeat, and persisted report events are integrated with the existing job runner.
 - [x] **Tool-run provenance.** Every check records its tool, input hash, output reference, status, timestamps, duration, environment names, and spec/source hashes without exposing credential values.
@@ -96,8 +104,8 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 
 - [x] **VER-01 — Generate acceptance checks.** Deterministic API, persistence, browser, validation, migration, republishing, and security artifacts are generated from AppSpec and verified.
 - [x] **VER-02 — Verifier and report model.** Durable reports include spec/source hashes, tool-run IDs, durations, full-coverage publish evaluation, and actionable failures; subprocess results—not model review—determine outcomes.
-- [ ] **VER-03 — Deployment registry lookup — Next.** Route public deployment lookup through the registry instead of scanning user databases.
-- [ ] **VER-04 — Gate new releases and expose results.** Block failing new publishes without taking existing releases offline; add the verification panel.
+- [x] **VER-03 — Deployment registry lookup.** Public hosting resolves through the control-plane registry with owner-scoped artifacts, write-through synchronization, and backfilled version metadata; no user database scan is required.
+- [ ] **VER-04 — Gate new releases and expose results — Next.** Block failing new publishes without taking existing releases offline; add the verification panel.
 
 **Milestone gate:** `[ ]` Deterministic verification becomes the only new-release gate.
 
@@ -142,3 +150,4 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 | 2026-10-27 | Deterministic overlay and staged builds | Complete-source, staging, failure/promotion, full backend/frontend, and multi-file browser checks | 118 backend and 9 frontend unit tests plus 1 browser test passed; Cruto v3 reached review with HTTP 200 preview; backups retained |
 | 2026-10-27 | VER-01 acceptance generation | Deterministic artifacts, generated security execution and violation detection, live generated API health/CRUD/validation, full regressions | 123 backend and 9 frontend unit tests passed; production build and lint clean |
 | 2026-10-27 | VER-02 verifier and report model | Nine verifier tests covering retries, coverage, failures, stale hashes, runtime, security, and Playwright; full regressions | 132 backend and 9 frontend unit tests passed; production build and lint clean |
+| 2026-10-27 | VER-03 deployment registry lookup | Registry write-through, backfill, no-scan lookup, migration/republication, and full regressions | 136 backend and 9 frontend unit tests passed; production build and lint clean |

@@ -15,6 +15,7 @@ from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manag
 from .frontend_builder import PackageBuildError, deployment_archive, ensure_frontend_build, frontend_asset_path
 from .features import FeatureFlag, feature_enabled
 from .spec.review import appspec_review
+from .deployment_registry import delete_deployment, upsert_deployment
 
 router = APIRouter(prefix='/api')
 _generation_jobs: dict[asyncio.Task, tuple[int, str]] = {}
@@ -267,6 +268,7 @@ async def delete_project(project_id: str, user=Depends(current_user)):
     with workspace_db(user['id']) as db:
         for table in ['artifacts', 'versions', 'messages', 'events', 'projects']:
             db.execute(f'DELETE FROM {table} WHERE {"id" if table == "projects" else "project_id"}=?', (project_id,))
+    delete_deployment(project_id)
     return {'ok': True}
 
 
@@ -483,6 +485,7 @@ async def publish_project(project_id: str, body: PublishInput, user=Depends(curr
         add_event(db, project_id, f'Version {version} published', 'success')
         add_message(db, project_id, 'agent', f'Version {version} is live. Your public link is ready to share.', 'deployment')
     await runtime_manager.stop_project(project_id, channel='public', keep_version=version)
+    upsert_deployment(user['id'], project_id)
     return project_payload(user['id'], project_id)
 
 
@@ -493,6 +496,7 @@ async def unpublish_project(project_id: str, user=Depends(current_user)):
         db.execute('UPDATE projects SET published_version=NULL WHERE id=?', (project_id,))
         add_event(db, project_id, 'Publication revoked')
     await runtime_manager.stop_project(project_id, channel='public')
+    delete_deployment(project_id)
     return {'ok': True}
 
 

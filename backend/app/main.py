@@ -4,7 +4,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from .config import settings
-from .database import init_databases, workspace_db
+from .database import init_databases
+from .deployment_registry import deployment_artifacts, get_deployment
+from .llm import GenerationError
 from .api import cancel_generation_jobs, forward_runtime, router
 from .runtime import inject_runtime_bootstrap, runtime_manager
 from .frontend_builder import PackageBuildError, ensure_frontend_build, frontend_asset_path
@@ -31,34 +33,14 @@ def health():
 
 
 def published_app(project_id: str):
-    for path in (settings.data_path / 'users').glob('user_*.db'):
-        user_id = int(path.stem.split('_')[1])
-        with workspace_db(user_id) as db:
-            project = db.execute('''SELECT p.published_version,p.backend_mode current_mode,v.backend_mode version_mode,
-                                    p.source_format current_format,v.source_format version_format
-                                    FROM projects p LEFT JOIN versions v ON v.project_id=p.id AND v.version=p.published_version
-                                    WHERE p.id=?''', (project_id,)).fetchone()
-            if project and project['published_version']:
-                source_format = project['version_format'] or project['current_format']
-                if source_format == 'multi-file':
-                    artifacts = db.execute('SELECT path,content FROM artifacts WHERE project_id=? AND version=?',
-                                           (project_id, project['published_version'])).fetchall()
-                    files = {artifact['path']: artifact['content'] for artifact in artifacts}
-                    if files:
-                        return {
-                            'user_id': user_id, 'version': project['published_version'],
-                            'backend_mode': project['version_mode'] or project['current_mode'],
-                            'source_format': source_format, 'files': files, 'html': None,
-                        }
-                artifact = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?',
-                                      (project_id, 'index.html', project['published_version'])).fetchone()
-                if artifact:
-                    return {
-                        'user_id': user_id, 'version': project['published_version'],
-                        'backend_mode': project['version_mode'] or project['current_mode'],
-                        'source_format': source_format, 'files': {}, 'html': artifact['content'],
-                    }
-    raise HTTPException(404, 'This application is not published')
+    deployment = get_deployment(project_id)
+    if not deployment:
+        raise HTTPException(404, 'This application is not published')
+    try:
+        artifacts = deployment_artifacts(deployment)
+    except GenerationError as exc:
+        raise HTTPException(404, 'The published application source is unavailable') from exc
+    return {**deployment, **artifacts}
 
 
 @app.get('/apps/{project_id}', response_class=HTMLResponse)
