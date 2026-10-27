@@ -37,6 +37,7 @@ def test_acceptance_generation_is_deterministic_and_provenance_complete():
     assert set(first) == {
         'acceptance/api_tests.py', 'acceptance/browser_tests.spec.js',
         'acceptance/security_tests.py', 'acceptance/migration_tests.py', 'acceptance/manifest.json',
+        'acceptance/playwright.config.ts',
     }
     document = manifest(first)
     assert document['spec_hash'] == package.spec_hash
@@ -132,7 +133,7 @@ def test_spec_artifacts_include_acceptance_without_changing_build_inputs():
     assert set(artifacts) == {
         'appspec.json', 'build-manifest.json', 'acceptance/api_tests.py',
         'acceptance/browser_tests.spec.js', 'acceptance/security_tests.py',
-        'acceptance/migration_tests.py', 'acceptance/manifest.json',
+        'acceptance/migration_tests.py', 'acceptance/manifest.json', 'acceptance/playwright.config.ts',
     }
     assert _digest(package.files) == _digest({**package.files, **artifacts})
 

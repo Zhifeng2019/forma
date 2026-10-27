@@ -1,7 +1,7 @@
 # Forma Studio v1.4 — Implementation Tracker
 
 **Last updated:** 2026-10-27  
-**Current focus:** VER-02 — Deterministic verifier and report model
+**Current focus:** VER-03 — Deployment registry lookup
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
 This is the persistent implementation record for the approved sequence:
@@ -10,7 +10,15 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — VER-01 acceptance generation
+## Latest completed increment — VER-02 verifier and report model
+
+- [x] **Durable verification jobs.** Idempotent verification, forced retry attempts, heartbeat, and persisted report events are integrated with the existing job runner.
+- [x] **Tool-run provenance.** Every check records its tool, input hash, output reference, status, timestamps, duration, environment names, and spec/source hashes without exposing credential values.
+- [x] **Deterministic report model.** Reports distinguish passed, failed, blocked, skipped, and warning states, include actionable errors and tool-run IDs, and require full required-check coverage for `can_publish`.
+- [x] **Build/runtime and browser execution.** Acceptance artifacts are rematerialized after staging, generated runtimes are health-checked and cleaned up, and Playwright runs with an available system Chrome or configured browser path.
+- [x] **Verification evidence.** Pass/fail/blocked/warning outcomes, partial coverage, stale hashes, forced retries, live FastAPI/CRUD/security, and real Playwright checks pass. Publish enforcement and the verification UI remain VER-04.
+
+## Earlier completed increment — VER-01 acceptance generation
 
 - [x] **VER-01A — Acceptance manifest.** Deterministic check IDs, provenance hashes, required environment, timeouts, and mutation flags are generated for every AppSpec build.
 - [x] **VER-01B — API and persistence checks.** Health, CRUD, required-validation, and restart-persistence tests are generated from the declared entity and operations.
@@ -87,8 +95,8 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 ## Milestone 3 — Deterministic verification and deployment registry
 
 - [x] **VER-01 — Generate acceptance checks.** Deterministic API, persistence, browser, validation, migration, republishing, and security artifacts are generated from AppSpec and verified.
-- [ ] **VER-02 — Verifier and report model — Next.** Produce deterministic reports with spec/source hashes, tool-run references, duration, and actionable failures; model review cannot override them.
-- [ ] **VER-03 — Deployment registry lookup — Partial.** Registry schema and published-project backfill exist. Route public deployment lookup through the registry instead of scanning user databases.
+- [x] **VER-02 — Verifier and report model.** Durable reports include spec/source hashes, tool-run IDs, durations, full-coverage publish evaluation, and actionable failures; subprocess results—not model review—determine outcomes.
+- [ ] **VER-03 — Deployment registry lookup — Next.** Route public deployment lookup through the registry instead of scanning user databases.
 - [ ] **VER-04 — Gate new releases and expose results.** Block failing new publishes without taking existing releases offline; add the verification panel.
 
 **Milestone gate:** `[ ]` Deterministic verification becomes the only new-release gate.
@@ -133,3 +141,4 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 | 2026-10-27 | Relative-import validation and Cruto repair | Import/repair regressions, complete backend/frontend checks, Cruto v2 Vite build and preview | 113 backend and 9 frontend unit tests passed; Cruto v2 is ready with HTTP 200 preview; workspace backup retained |
 | 2026-10-27 | Deterministic overlay and staged builds | Complete-source, staging, failure/promotion, full backend/frontend, and multi-file browser checks | 118 backend and 9 frontend unit tests plus 1 browser test passed; Cruto v3 reached review with HTTP 200 preview; backups retained |
 | 2026-10-27 | VER-01 acceptance generation | Deterministic artifacts, generated security execution and violation detection, live generated API health/CRUD/validation, full regressions | 123 backend and 9 frontend unit tests passed; production build and lint clean |
+| 2026-10-27 | VER-02 verifier and report model | Nine verifier tests covering retries, coverage, failures, stale hashes, runtime, security, and Playwright; full regressions | 132 backend and 9 frontend unit tests passed; production build and lint clean |

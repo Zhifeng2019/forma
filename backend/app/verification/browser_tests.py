@@ -113,4 +113,13 @@ test('invalid input returns an error without creating a record', async ({{ page 
                                              'invalid input returns an error without creating a record',
                                              'acceptance/browser_tests.spec.js', mutates=True,
                                              environment=('APP_PREVIEW_URL',)))
-    return {'acceptance/browser_tests.spec.js': header + '\n'.join(tests)}, checks
+    config = (
+        "import { defineConfig } from '@playwright/test'\n\n"
+        "export default defineConfig({ testDir: '.', workers: 1, timeout: 90000, "
+        "use: { viewport: { width: 1440, height: 1000 }, channel: process.env.PLAYWRIGHT_CHANNEL || undefined }, "
+        "reporter: 'line' })\n"
+    )
+    return {
+        'acceptance/browser_tests.spec.js': header + '\n'.join(tests),
+        'acceptance/playwright.config.ts': config,
+    }, checks

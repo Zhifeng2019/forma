@@ -15,7 +15,10 @@ import re
 import unittest
 import zipfile
 
-SOURCE = Path(os.environ.get('APP_SOURCE_DIR', '')).resolve()
+SOURCE_VALUE = os.environ.get('APP_SOURCE_DIR', '')
+if not SOURCE_VALUE:
+    raise RuntimeError('APP_SOURCE_DIR is required')
+SOURCE = Path(SOURCE_VALUE).resolve()
 ALLOWED_PYTHON = {allowed_python!r}
 ALLOWED_NPM = {sorted(FRONTEND_DEPENDENCIES)!r}
 SKIP = {{'node_modules', 'dist', '.venv', 'tmp', '__pycache__', 'acceptance'}}

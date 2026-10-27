@@ -227,6 +227,8 @@ def deployment_archive(
             if not path.is_file() or {'node_modules', '__pycache__', 'npm-cache', 'tmp'} & set(path.parts):
                 continue
             relative = path.relative_to(root)
+            if relative.parts[0] == 'acceptance' and relative.name == 'deployment.zip':
+                continue
             if relative.parts[0] == 'backend' and backend_mode != 'fastapi':
                 continue
             if path.name.startswith('.forma-') or path.suffix in {'.pyc', '.sqlite', '.db'}:

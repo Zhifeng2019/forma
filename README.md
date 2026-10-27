@@ -85,6 +85,7 @@ The v1.4 work is additive and disabled by default. Task status and acceptance ev
 - With `APPSPEC_V1` enabled, builds, refinements, and migrations compile from AppSpec and persist `appspec.json` plus `build-manifest.json`. The v1 compiler supports one entity and reviewed collection CRUD routes; flag-off behavior preserves the existing generators.
 - Planning creates a version-0 AppSpec draft for the Contract review panel. Plan feedback and pre-build architecture changes revise the draft, and invalid contracts are blocked before compilation.
 - AppSpec versions include `acceptance/` artifacts: a provenance manifest plus executable API, browser, security, migration, and republishing checks with explicit environment requirements and mutation flags.
+- The deterministic verifier produces durable reports with spec/source hashes, tool-run IDs, durations, blocked/failed details, full-coverage `can_publish` evaluation, and forced retry support. Publish enforcement and the verification UI remain VER-04.
 - Broader multi-entity synthesis, resumable SSE, full tool telemetry, deterministic release gates, specialist workers, and sandboxing remain separate tracked tasks.
 
 Regenerate the evaluation baseline with:

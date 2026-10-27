@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     data_dir: str = str(ROOT.parent / 'data')
     secret_key: str = 'forma-local-development-secret-change-in-production'
     cors_origins: str = 'http://localhost:5173,http://127.0.0.1:5173'
+    studio_base_url: str = 'http://127.0.0.1:8000'
     access_token_days: int = 14
     runtime_python: str = ''
     runtime_pip_index_url: str = 'https://mirrors.aliyun.com/pypi/simple/'

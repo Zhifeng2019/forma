@@ -230,7 +230,7 @@ def test_deferred_durable_autopilot_writes_spec_for_every_version(monkeypatch):
                                   (project_id, path)).fetchone()[0] == expected
             for path in ('acceptance/manifest.json', 'acceptance/api_tests.py',
                          'acceptance/browser_tests.spec.js', 'acceptance/security_tests.py',
-                         'acceptance/migration_tests.py'):
+                         'acceptance/migration_tests.py', 'acceptance/playwright.config.ts'):
                 assert db.execute('SELECT COUNT(*) FROM artifacts WHERE project_id=? AND path=?',
                                   (project_id, path)).fetchone()[0] == 3
             jobs = db.execute('SELECT status FROM generation_jobs WHERE project_id=?', (project_id,)).fetchall()

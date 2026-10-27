@@ -49,6 +49,7 @@ def _prepare_attempt(
     trace_id: str,
     worker_id: str,
     lease_seconds: int,
+    retry_succeeded: bool = False,
 ) -> tuple[str, dict] | None:
     with workspace_db(user_id) as db:
         job_id, created = create_job(db, project_id, stage, input_hash, action, trace_id)
@@ -57,9 +58,9 @@ def _prepare_attempt(
             raise RuntimeError('The generation job could not be loaded')
         status = job['status']
         if not created:
-            if status == JobStatus.SUCCEEDED.value or status in _ACTIVE_STATUSES:
+            if status in _ACTIVE_STATUSES or (status == JobStatus.SUCCEEDED.value and not retry_succeeded):
                 return None
-            if status in _RETRYABLE_STATUSES:
+            if status in _RETRYABLE_STATUSES or (retry_succeeded and status == JobStatus.SUCCEEDED.value):
                 with job_transaction(db):
                     db.execute('UPDATE generation_jobs SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?',
                                (JobStatus.RECOVERY_REQUIRED.value, job_id, status))
@@ -115,6 +116,7 @@ async def run_generation_job(
     worker_id: str | None = None,
     lease_seconds: int = 60,
     heartbeat_interval: float | None = None,
+    retry_succeeded: bool = False,
 ) -> bool:
     """Run one leased attempt; return False when an equivalent job already owns the work."""
     if lease_seconds <= 0:
@@ -126,7 +128,7 @@ async def run_generation_job(
     trace_id = uuid.uuid4().hex
     worker_id = worker_id or f'local-{uuid.uuid4().hex}'
     prepared = _prepare_attempt(
-        user_id, project_id, stage, action, input_hash, trace_id, worker_id, lease_seconds,
+        user_id, project_id, stage, action, input_hash, trace_id, worker_id, lease_seconds, retry_succeeded,
     )
     if prepared is None:
         return False
