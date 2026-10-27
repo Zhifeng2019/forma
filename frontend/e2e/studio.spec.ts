@@ -113,7 +113,8 @@ test('a FastAPI app runs, persists data, and works at its public URL', async ({ 
     await page.getByRole('button', { name: 'Build phase 1' }).click()
     await expect(page.getByRole('button', { name: 'Approve phase 1' })).toBeEnabled()
     const frame = page.frameLocator('iframe')
-    await expect(frame.getByText('FastAPI connected')).toBeVisible({ timeout: 60_000 })
+    // First use creates the app environment and installs its pinned dependencies.
+    await expect(frame.getByText('FastAPI connected')).toBeVisible({ timeout: 180_000 })
     await page.getByRole('button', { name: 'Server', exact: true }).click()
     await expect(page.getByText('Healthy', { exact: true })).toBeVisible()
     await expect(page.getByText('Per-app Python + SQLite')).toBeVisible()

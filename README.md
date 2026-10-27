@@ -71,6 +71,12 @@ Each environment installs its pinned dependencies using its own `.venv/bin/pytho
 
 Published APIs are public with the application URL and do not require a Forma session. Source validation and process isolation reduce risk, but this is **not a hardened multi-tenant sandbox**. Use this release with trusted local projects only; add container isolation and product-level authentication before handling untrusted users or sensitive application data.
 
+## Deterministic release verification
+
+Enable both `APPSPEC_V1` and `ACCEPTANCE_GATE_V1` to generate and execute typed acceptance contracts. The **Verification** tab supports deferred application checks and optional migration/republishing checks, then displays coverage, required and optional failures, tools, targets, durations, source/spec hashes, and actionable errors.
+
+Publishing a different version always performs a fresh full required-check run while the gate is enabled; a previous manual pass is not reused as release evidence. Failed or incomplete verification blocks the new publish without changing the existing public release. Republishing the already-live version is idempotent. With the gate disabled, legacy publishing behavior remains unchanged.
+
 ## Production shape
 
 Build the frontend with `npm run build`; FastAPI serves `frontend/dist` when present. Set a strong `SECRET_KEY`, restrict `CORS_ORIGINS`, put the service behind HTTPS, and replace the initial administrator credentials. Do not expose generated-code execution to untrusted users without a container or equivalent security sandbox.
@@ -85,9 +91,10 @@ The v1.4 work is additive and disabled by default. Task status and acceptance ev
 - With `APPSPEC_V1` enabled, builds, refinements, and migrations compile from AppSpec and persist `appspec.json` plus `build-manifest.json`. The v1 compiler supports one entity and reviewed collection CRUD routes; flag-off behavior preserves the existing generators.
 - Planning creates a version-0 AppSpec draft for the Contract review panel. Plan feedback and pre-build architecture changes revise the draft, and invalid contracts are blocked before compilation.
 - AppSpec versions include `acceptance/` artifacts: a provenance manifest plus executable API, browser, security, migration, and republishing checks with explicit environment requirements and mutation flags.
-- The deterministic verifier produces durable reports with spec/source hashes, tool-run IDs, durations, blocked/failed details, full-coverage `can_publish` evaluation, and forced retry support. Publish enforcement and the verification UI remain VER-04.
+- The deterministic verifier produces durable reports with spec/source hashes, tool-run IDs, durations, blocked/failed details, full-coverage `can_publish` evaluation, and forced retry support. The Verification panel presents this evidence and refreshes deferred runs automatically.
+- With `ACCEPTANCE_GATE_V1` and `APPSPEC_V1` enabled, every new publish requires a fresh full required-check run. Failed verification does not replace or unpublish the existing release; republishing the already-live version remains idempotent.
 - Public deployments resolve through the control-plane registry with write-through publish, republish, unpublish, and delete synchronization and backfilled version-specific architecture. Public lookup no longer scans every user database.
-- Broader multi-entity synthesis, resumable SSE, full tool telemetry, deterministic release gates, specialist workers, and sandboxing remain separate tracked tasks.
+- Baseline quality metrics and fixtures, broader multi-entity synthesis, resumable SSE, complete cancellation and tool telemetry, specialist workers, and sandboxing remain separate tracked tasks.
 
 Regenerate the evaluation baseline with:
 

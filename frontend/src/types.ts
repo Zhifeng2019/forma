@@ -29,6 +29,21 @@ export type AppSpecDocument = {
 export type AppSpecEnvelope = {
   schema_version: string; compiler_version: string; spec_hash: string; spec: AppSpecDocument
 }
+export type VerificationCheck = {
+  id: string; kind: string; target: string; status: 'passed' | 'failed' | 'blocked' | 'skipped'
+  required: boolean; mutates: boolean; tool_run_id: string; duration_ms: number
+  output_ref: string; error?: string
+}
+export type VerificationReport = {
+  schema_version: string; project_id: string; version: number; job_id: string; attempt_id: number
+  spec_hash: string; source_hash: string; status: 'passed' | 'failed' | 'passed_with_warnings'
+  can_publish: boolean; complete_coverage: boolean
+  summary: {
+    total: number; passed: number; failed: number; blocked: number; skipped: number
+    required_failures: string[]; optional_failures: string[]
+  }
+  started_at: string; ended_at: string; duration_ms: number; checks: VerificationCheck[]
+}
 export type Project = {
   id: string; name: string; brief: string; description: string; stage: string; stage_index: number
   phase_index: number; status: 'ready' | 'working' | 'error'; auto_mode: boolean; current_version: number
@@ -37,5 +52,6 @@ export type Project = {
   messages: Message[]; artifacts: Artifact[]; versions: Version[]; events: StudioEvent[]
   appspec_enabled?: boolean; appspec?: AppSpecEnvelope | null
   appspec_valid?: boolean | null; appspec_error?: string | null
+  verification?: VerificationReport | null; verification_running?: boolean
 }
 export type Selection = { selector: string; text: string } | null

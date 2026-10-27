@@ -15,7 +15,7 @@ from ..config import ROOT, Settings, settings
 from ..database import workspace_db
 from ..features import FeatureFlag, require_feature
 from ..frontend_builder import (
-    _node_binaries, deployment_archive, ensure_frontend_build, safe_path, version_directory,
+    _node_binaries, deployment_archive, ensure_frontend_build, safe_path, version_directory, write_source_files,
 )
 from ..jobs.idempotency import canonical_input_hash, job_idempotency_key
 from ..jobs.runner import run_generation_job
@@ -236,6 +236,7 @@ async def _run_studio_build(user_id: int, project_id: str, version: int, context
     if context['source_format'] == 'multi-file':
         await ensure_frontend_build(user_id, project_id, version, context['files'])
         return
+    write_source_files(project_id, version, context['files'])
     index = version_directory(project_id, version) / 'index.html'
     if not index.is_file() or '<html' not in index.read_text().lower():
         raise GenerationError('The single-file production document is missing or invalid.')

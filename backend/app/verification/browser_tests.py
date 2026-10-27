@@ -30,13 +30,14 @@ const openApp = async page => {{
   await expect(page.locator('main')).toBeVisible()
 }}
 '''
-    tests = [f'''
-test('primary workflow renders', async ({{ page }}) => {{
+    tests = ['''
+test('primary workflow renders', async ({ page }) => {
   await openApp(page)
   await expect(page.locator('body')).not.toContainText('Build failed')
-  {"await expect(page.getByRole('heading', {{ name: PRIMARY_WORKFLOW }})).toBeVisible()" if contract else ''}
-}})
-''']
+  __PRIMARY_HEADING_CHECK__
+})
+'''.replace('__PRIMARY_HEADING_CHECK__',
+               "await expect(page.getByRole('heading', { name: PRIMARY_WORKFLOW })).toBeVisible()" if contract else '')]
     checks = [GeneratedCheck('browser.primary-workflow', 'browser', '/', 'primary workflow renders',
                              'acceptance/browser_tests.spec.js', environment=('APP_PREVIEW_URL',))]
     if contract:

@@ -1,7 +1,7 @@
 # Forma Studio v1.4 — Implementation Tracker
 
 **Last updated:** 2026-10-27  
-**Current focus:** VER-04 — Gate new releases and expose verification
+**Current focus:** Milestone 3 complete — deferred BASE/JOB follow-ups are the next checkpoint
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
 This is the persistent implementation record for the approved sequence:
@@ -10,7 +10,14 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — VER-03 deployment registry lookup
+## Latest completed increment — VER-04 release gate and verification visibility
+
+- [x] **VER-04A — Verification API.** Synchronous and deferred verification endpoints expose running state and persisted reports; deferred failures produce actionable project errors and agent messages.
+- [x] **VER-04B — Publish enforcement.** New publishes require fresh full-coverage verification when the gate is enabled. Idempotent republishing is allowed, and failed verification leaves the existing release online.
+- [x] **VER-04C — Verification panel.** The panel exposes status, coverage, failed checks, tools, targets, durations, actionable errors, and optional migration checks with responsive desktop/mobile layouts.
+- [x] **VER-04D — Regression coverage.** Pass/fail gates, legacy flag-off behavior, report APIs, deferred refresh and failure reporting, single-file source materialization, and verification panel states are covered.
+
+## Earlier completed increment — VER-03 deployment registry lookup
 
 - [x] **Registry-only public lookup.** Public HTML, assets, and API routing resolve deployment metadata from the control-plane registry instead of scanning every user database.
 - [x] **Owner-scoped artifacts.** Published source is read only from the registered owner’s workspace and selected published version.
@@ -89,6 +96,8 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 
 **Milestone gate:** `[ ]` SSE, full tool-boundary cancellation, and telemetry remain open.
 
+**Deferred by design:** BASE-01 needs a baseline schema and generation-quality metrics; BASE-03 needs materialized fixtures. JOB-05 is resumable SSE rather than polling, JOB-06 still needs cancellation at every tool/process boundary, and JOB-07 still needs provider token/cost telemetry. These are deliberate follow-ups before specialist workers, not completed capabilities and not forgotten tasks.
+
 ## Milestone 2 — AppSpec and deterministic compilation
 
 - [x] **SPEC-01 — Versioned schema.** Implemented in `backend/app/spec/types.py` and `schema.py`; schema and cross-contract tests pass.
@@ -105,9 +114,9 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 - [x] **VER-01 — Generate acceptance checks.** Deterministic API, persistence, browser, validation, migration, republishing, and security artifacts are generated from AppSpec and verified.
 - [x] **VER-02 — Verifier and report model.** Durable reports include spec/source hashes, tool-run IDs, durations, full-coverage publish evaluation, and actionable failures; subprocess results—not model review—determine outcomes.
 - [x] **VER-03 — Deployment registry lookup.** Public hosting resolves through the control-plane registry with owner-scoped artifacts, write-through synchronization, and backfilled version metadata; no user database scan is required.
-- [ ] **VER-04 — Gate new releases and expose results — Next.** Block failing new publishes without taking existing releases offline; add the verification panel.
+- [x] **VER-04 — Gate new releases and expose results.** Fresh full-coverage verification blocks failing new publishes without taking existing releases offline; the verification API and panel expose actionable evidence.
 
-**Milestone gate:** `[ ]` Deterministic verification becomes the only new-release gate.
+**Milestone gate:** `[x]` With `ACCEPTANCE_GATE_V1` enabled, deterministic verification is the required new-release gate. Legacy publishing remains available with the feature flag off.
 
 ## Milestone 4 — Scoped specialist workers
 
@@ -151,3 +160,4 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 | 2026-10-27 | VER-01 acceptance generation | Deterministic artifacts, generated security execution and violation detection, live generated API health/CRUD/validation, full regressions | 123 backend and 9 frontend unit tests passed; production build and lint clean |
 | 2026-10-27 | VER-02 verifier and report model | Nine verifier tests covering retries, coverage, failures, stale hashes, runtime, security, and Playwright; full regressions | 132 backend and 9 frontend unit tests passed; production build and lint clean |
 | 2026-10-27 | VER-03 deployment registry lookup | Registry write-through, backfill, no-scan lookup, migration/republication, and full regressions | 136 backend and 9 frontend unit tests passed; production build and lint clean |
+| 2026-10-27 | VER-04 release gate and Milestone 3 | Gate/API/deferred-error coverage, verification panel, full regressions, and desktop/mobile browser evidence | 143 backend and 12 frontend unit tests passed; 1 verification and 5 legacy browser journeys passed; production build and lint clean |

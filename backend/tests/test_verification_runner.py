@@ -238,3 +238,26 @@ def test_live_package_verification_with_runtime_and_security():
     assert report['complete_coverage'] is False and report['can_publish'] is False
     assert report['spec_hash'] == package.spec_hash and report['source_hash'] == package.source_hash
     assert asyncio.run(runtime_manager.status(project_id, 1))['status'] == 'stopped'
+
+
+def test_single_file_verification_materializes_source_before_build():
+    user_id = 950108
+    workspace_for(user_id)
+    project_id = uuid.uuid4().hex
+    package = compile_package(local_default_appspec(
+        'Single File Verification', 'Verify a single-file static application.', 'single-file', 'static',
+    ), phase=1)
+    provenance = spec_artifacts(package)
+    with workspace_db(user_id) as db:
+        db.execute("INSERT INTO projects(id,name,brief,backend_mode,source_format) VALUES(?,?,?,?,?)",
+                   (project_id, 'Single File Verification', 'Verify a single-file static application.', 'static', 'single-file'))
+        db.execute("INSERT INTO versions(project_id,version,label,backend_mode,source_format) VALUES(?,?,?,?,?)",
+                   (project_id, 1, 'Phase 1', 'static', 'single-file'))
+        for path, content in {**package.files, **provenance}.items():
+            db.execute('INSERT INTO artifacts(project_id,stage,path,content,version) VALUES(?,?,?,?,?)',
+                       (project_id, 'build', path, content, 1))
+    selected = {'build.production', 'security.no-embedded-credentials', 'security.no-external-frontend-urls'}
+    report = asyncio.run(verify_package(user_id, project_id, 1, selected_check_ids=selected, config=enabled()))
+    assert report['status'] == 'passed', report['summary']
+    assert all(check['status'] == 'passed' for check in report['checks'])
+    assert (version_directory(project_id, 1) / 'index.html').is_file()
