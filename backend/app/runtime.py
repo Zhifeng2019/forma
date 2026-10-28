@@ -20,6 +20,9 @@ from .backend_engine import runtime_requirements
 from .config import settings
 from .engine import validate_project_id
 from .frontend_builder import PackageBuildError, write_source_files
+from .jobs.context import current_job_context
+from .jobs.models import JobCancelledError
+from .jobs.processes import run_process
 
 
 class RuntimeLaunchError(RuntimeError):
@@ -191,18 +194,15 @@ class RuntimeManager:
             'print("; ".join(problems))\n'
             'sys.exit(bool(problems))\n'
         )
-        process = await asyncio.create_subprocess_exec(
-            str(python), '-c', script, str(requirements),
-            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL, cwd=cwd, env=env, start_new_session=True,
-        )
         try:
-            output, _ = await asyncio.wait_for(process.communicate(), timeout=20)
+            result = await run_process(
+                [str(python), '-c', script, str(requirements)], cwd, env, 20,
+                'verify the application dependencies',
+            )
         except TimeoutError:
-            await self._terminate_process(process)
             return False, 'dependency verification timed out'
-        detail = output.decode(errors='replace').strip()[:600]
-        if process.returncode == 0:
+        detail = result.output.strip()[:600]
+        if result.returncode == 0:
             return True, 'verified in the application virtual environment'
         return False, detail or 'dependency verification failed'
 
@@ -214,17 +214,11 @@ class RuntimeManager:
         cwd: Path,
         timeout: int = 120,
     ) -> None:
-        process = await asyncio.create_subprocess_exec(
-            *command, stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            cwd=cwd, env=env, start_new_session=True,
-        )
         try:
-            output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            result = await run_process(command, cwd, env, timeout, action)
         except TimeoutError as exc:
-            await self._terminate_process(process)
             raise RuntimeLaunchError(f'Timed out while trying to {action}. Please retry.') from exc
-        if process.returncode:
+        if result.returncode:
             # Package indexes and local paths can contain private configuration;
             # keep raw installer output out of API responses and activity history.
             raise RuntimeLaunchError(f'Could not {action}. Check the Python installation and network, then retry.')
@@ -252,6 +246,10 @@ class RuntimeManager:
         source_dir: Path,
     ) -> ManagedRuntime:
         _root, environment, _source, work = self._paths(project_id, version)
+        context = current_job_context()
+        if context:
+            context.raise_if_cancelled()
+        tool_run_id = f'runtime-start:{key}'
         port = self._free_port()
         logs = self._logs.setdefault(key, deque(maxlen=120))
         logs.append(f'Starting FastAPI version {version} ({channel})')
@@ -262,6 +260,8 @@ class RuntimeManager:
             stderr=asyncio.subprocess.STDOUT, cwd=work,
             env=self._clean_environment(work, environment), start_new_session=True,
         )
+        if context:
+            context.own_tool(tool_run_id, process.pid)
         reader = asyncio.create_task(self._drain_logs(key, process.stdout))
         runtime = ManagedRuntime(
             key=key, project_id=project_id, version=version, channel=channel,
@@ -271,14 +271,21 @@ class RuntimeManager:
         self._runtimes[key] = runtime
         try:
             await self._wait_until_healthy(runtime)
+        except JobCancelledError:
+            await self._stop(key)
+            raise
         except Exception as exc:
             await self._stop(key)
             message = str(exc) if isinstance(exc, RuntimeLaunchError) else 'The application backend did not become healthy.'
             self._errors[key] = message
             raise RuntimeLaunchError(message) from exc
-        self._errors.pop(key, None)
-        logs.append('Health check passed; FastAPI is ready')
-        return runtime
+        else:
+            self._errors.pop(key, None)
+            logs.append('Health check passed; FastAPI is ready')
+            return runtime
+        finally:
+            if context:
+                context.release_tool(tool_run_id)
 
     def _free_port(self) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
@@ -299,8 +306,11 @@ class RuntimeManager:
     async def _wait_until_healthy(self, runtime: ManagedRuntime) -> None:
         url = f'http://127.0.0.1:{runtime.port}/api/health'
         deadline = time.monotonic() + settings.runtime_start_timeout
+        context = current_job_context()
         async with httpx.AsyncClient(timeout=2, trust_env=False) as client:
             while time.monotonic() < deadline:
+                if context:
+                    context.raise_if_cancelled()
                 if runtime.process.returncode is not None:
                     await asyncio.sleep(0)
                     tail = '\n'.join(list(self._logs[runtime.key])[-8:])

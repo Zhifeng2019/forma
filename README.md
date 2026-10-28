@@ -88,6 +88,7 @@ The v1.4 work is additive and disabled by default. Task status and acceptance ev
 - Typed feature flags cover durable jobs, AppSpec, acceptance gates, specialist workers, and sandboxing.
 - The durable runner supports idempotent jobs, attempts, checkpoints, heartbeat, cancellation, retry, and stale-finalization protection for stage generation, document revision, and architecture migration.
 - Attempt-scoped contexts carry cancellation, trace IDs, and tool ownership. Project payloads expose `active_job`, and `POST /api/projects/<project-id>/jobs/<job-id>/cancel` provides owner-checked, idempotent cancellation with persisted `cancel_requested`, `cancelling`, and `cancelled` transitions and no automatic retry.
+- A shared process supervisor covers provider calls, npm/pip/venv setup, dependency probes, Vite builds, Playwright, and runtime startup. It races cancellation and timeouts, redacts output, and cleans only attempt-owned process groups with bounded escalation and output draining; unrelated preview and published runtimes remain untouched.
 - AppSpec v1 provides schema-aware provider proposals with a structured-JSON fallback, one bounded semantic repair, a typed contract, deterministic single-entity CRUD source synthesis, and a legacy adapter.
 - With `APPSPEC_V1` enabled, builds, refinements, and migrations compile from AppSpec and persist `appspec.json` plus `build-manifest.json`. The v1 compiler supports one entity and reviewed collection CRUD routes; flag-off behavior preserves the existing generators.
 - Planning creates a version-0 AppSpec draft for the Contract review panel. Plan feedback and pre-build architecture changes revise the draft, and invalid contracts are blocked before compilation.
@@ -95,7 +96,7 @@ The v1.4 work is additive and disabled by default. Task status and acceptance ev
 - The deterministic verifier produces durable reports with spec/source hashes, tool-run IDs, durations, blocked/failed details, full-coverage `can_publish` evaluation, and forced retry support. The Verification panel presents this evidence and refreshes deferred runs automatically.
 - With `ACCEPTANCE_GATE_V1` and `APPSPEC_V1` enabled, every new publish requires a fresh full required-check run. Failed verification does not replace or unpublish the existing release; republishing the already-live version remains idempotent.
 - Public deployments resolve through the control-plane registry with write-through publish, republish, unpublish, and delete synchronization and backfilled version-specific architecture. Public lookup no longer scans every user database.
-- Broader multi-entity synthesis, resumable SSE, provider/process cancellation boundaries, usage telemetry, specialist workers, and sandboxing remain separate tracked tasks.
+- Broader multi-entity synthesis, resumable SSE, finalization/UI cancellation safety, usage telemetry, specialist workers, and sandboxing remain separate tracked tasks.
 
 Regenerate the evaluation baseline with:
 

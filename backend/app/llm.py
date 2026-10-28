@@ -1,6 +1,9 @@
+import asyncio
 import json
 import re
 import httpx
+from .jobs.context import current_job_context
+from .jobs.models import JobCancelledError
 from .security import decrypt_secret
 
 
@@ -56,6 +59,29 @@ async def complete_with_schema(
     return await _complete(provider, system, prompt, response_format, allow_json_fallback=True)
 
 
+async def _post_with_cancellation(client, url, kwargs):
+    context = current_job_context()
+    if context:
+        context.raise_if_cancelled()
+    request = asyncio.create_task(client.post(url, **kwargs))
+    if not context:
+        return await request
+    cancellation_waiter = asyncio.create_task(context.cancellation.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {request, cancellation_waiter}, return_when=asyncio.FIRST_COMPLETED,
+        )
+        if cancellation_waiter in done:
+            request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
+            context.raise_if_cancelled()
+        response = await request
+        context.raise_if_cancelled()
+        return response
+    finally:
+        cancellation_waiter.cancel()
+
+
 async def _complete(
     provider: dict, system: str, prompt: str, response_format: dict,
     allow_json_fallback: bool = False,
@@ -75,11 +101,12 @@ async def _complete(
         async with httpx.AsyncClient(timeout=240, trust_env=False) as client:
             attempt = 0
             while attempt <= OUTPUT_REPAIR_ATTEMPTS:
-                response = await client.post(url,
-                    headers={'Authorization': f'Bearer {decrypt_secret(provider["api_key_encrypted"])}'},
-                    json={'model': provider['model'], 'messages': messages,
-                          'temperature': 0.35, 'response_format': response_format,
-                          'max_tokens': MAX_OUTPUT_TOKENS, **_inference_options(provider)})
+                response = await _post_with_cancellation(client, url, {
+                    'headers': {'Authorization': f'Bearer {decrypt_secret(provider["api_key_encrypted"])}'},
+                    'json': {'model': provider['model'], 'messages': messages,
+                             'temperature': 0.35, 'response_format': response_format,
+                             'max_tokens': MAX_OUTPUT_TOKENS, **_inference_options(provider)},
+                })
                 if response.status_code >= 400:
                     if (allow_json_fallback and response_format.get('type') == 'json_schema'
                             and response.status_code in {400, 404, 422}):
@@ -95,6 +122,8 @@ async def _complete(
                 finish_reason = str(choice.get('finish_reason') or '')
                 if finish_reason != 'length':
                     try:
+                        if current_job_context():
+                            current_job_context().raise_if_cancelled()
                         return parse_json(content)
                     except GenerationError:
                         if attempt >= OUTPUT_REPAIR_ATTEMPTS:
@@ -116,6 +145,8 @@ async def _complete(
                 ]
                 attempt += 1
         raise GenerationError('The model did not return a usable structured response.')
+    except JobCancelledError:
+        raise
     except GenerationError:
         raise
     except Exception as exc:

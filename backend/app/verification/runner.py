@@ -1,11 +1,9 @@
 """Durable deterministic verification runner and tool-run persistence."""
 
-import asyncio
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-import signal
 import sys
 import time
 from urllib.parse import quote
@@ -18,6 +16,7 @@ from ..frontend_builder import (
     _node_binaries, deployment_archive, ensure_frontend_build, safe_path, version_directory, write_source_files,
 )
 from ..jobs.idempotency import canonical_input_hash, job_idempotency_key
+from ..jobs.processes import run_process
 from ..jobs.runner import run_generation_job
 from ..jobs.service import record_event
 from ..llm import GenerationError
@@ -183,33 +182,9 @@ def _process_environment(root: Path, env: dict) -> dict:
     }
 
 
-async def _terminate(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is None:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(process.wait(), timeout=5)
-        except TimeoutError:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-
-
 async def _execute_process(command: list[str], cwd: Path, env: dict, timeout: int) -> tuple[int, str]:
-    process = await asyncio.create_subprocess_exec(
-        *command, cwd=cwd, env=env, stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True,
-    )
-    try:
-        output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except (TimeoutError, asyncio.CancelledError):
-        await _terminate(process)
-        raise
-    return process.returncode, output.decode(errors='replace')[-4000:]
+    result = await run_process(command, cwd, env, timeout, 'execute an acceptance check')
+    return result.returncode, result.output[-4000:]
 
 
 def _command_for_check(root: Path, check: dict) -> tuple[list[str], Path]:

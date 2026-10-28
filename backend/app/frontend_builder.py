@@ -4,13 +4,12 @@ import asyncio
 import hashlib
 import io
 import json
-import os
 from pathlib import Path, PurePosixPath
 import shutil
-import signal
 import zipfile
 
 from .config import settings
+from .jobs.processes import run_process
 from .source_packages import frontend_package_json, frontend_vite_config
 from .spec.schema import SPEC_ARTIFACT_PATHS
 
@@ -108,37 +107,13 @@ def _environment(root: Path, node_modules: Path, node_binary: str) -> dict[str, 
 
 
 async def _run(command: list[str], cwd: Path, env: dict[str, str], timeout: int, action: str) -> str:
-    process = await asyncio.create_subprocess_exec(
-        *command, cwd=cwd, env=env, stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True,
-    )
     try:
-        output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except (TimeoutError, asyncio.CancelledError) as exc:
-        await _terminate(process)
-        if isinstance(exc, asyncio.CancelledError):
-            raise
+        result = await run_process(command, cwd, env, timeout, action)
+    except TimeoutError as exc:
         raise PackageBuildError(f'{action} timed out. Please retry.') from exc
-    text = output.decode(errors='replace')
-    if process.returncode:
-        raise PackageBuildError(f'{action} failed:\n{text[-3000:]}')
-    return text
-
-
-async def _terminate(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is None:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(process.wait(), timeout=5)
-        except TimeoutError:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
+    if result.returncode:
+        raise PackageBuildError(f'{action} failed:\n{result.output[-3000:]}')
+    return result.output
 
 
 _node_locks: dict[int, asyncio.Lock] = {}

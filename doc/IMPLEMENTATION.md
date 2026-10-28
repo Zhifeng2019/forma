@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-28
 
-**Current focus:** JOB-06B — provider and process cancellation boundaries (next slice; not started)
+**Current focus:** JOB-06C — finalization and UI safety (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -93,16 +93,16 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 - [x] **JOB-03 — Durable generation runner.** Stage generation, document revision, and architecture migration use `backend/app/jobs/runner.py` when enabled. `complete_package` remains inside its parent stage job by design.
 - [x] **JOB-04 — Preserve synchronous and deferred behavior.** Engine wrappers route deferred and synchronous work through the durable runner under `DURABLE_JOBS_V1`; legacy scheduling remains the fallback.
 - [ ] **JOB-05 — Resumable event delivery.** Add ordered SSE replay, reconnect resume, UI progress, and polling fallback. Persistent job events alone do not complete this task.
-- [ ] **JOB-06 — End-to-end cooperative cancellation — Partial.** The cancellation contract, API, context, and persistent transitions are complete. Add provider/process-boundary checks, finalization guards, process-group cleanup, and the busy-state cancel control.
+- [ ] **JOB-06 — End-to-end cooperative cancellation — Partial.** The cancellation contract and provider/process boundaries are complete. Add finalization guards, attempt-owned staging cleanup, and the busy-state cancel control.
 - [ ] **JOB-07 — Usage and provenance tracking.** Wire provider/model, tokens, cost, retries, build duration, runtime health, and source hashes into tool runs and the usage ledger.
 
 **Milestone gate:** `[ ]` SSE, full tool-boundary cancellation, and telemetry remain open.
 
-**Deferred by design:** BASE-01 and BASE-03 are complete. JOB-05 still needs resumable SSE, JOB-06 still needs provider/process boundaries and finalization safety, and JOB-07 still needs provider token/cost telemetry. These remain deliberate follow-ups before specialist workers, not completed capabilities and not forgotten tasks.
+**Deferred by design:** BASE-01 and BASE-03 are complete. JOB-05 still needs resumable SSE, JOB-06 still needs finalization/UI safety, and JOB-07 still needs provider token/cost telemetry. These remain deliberate follow-ups before specialist workers, not completed capabilities and not forgotten tasks.
 
 ## Next checkpoint — BASE/JOB pre-specialist readiness
 
-**Checkpoint status:** `[ ]` In progress — BASE-01, BASE-03, and JOB-06A are complete; JOB-06B is the next review slice.
+**Checkpoint status:** `[ ]` In progress — BASE-01, BASE-03, and JOB-06A/B are complete; JOB-06C is the next review slice.
 
 **Starting revision:** `a706e5a` (`Gate new releases with deterministic verification`).
 
@@ -144,7 +144,7 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 ### JOB-06 — End-to-end cooperative cancellation
 
 - [x] **JOB-06A — Attempt-scoped cancellation contract.** `backend/app/jobs/context.py` propagates cancellation, trace IDs, and tool/process-group ownership through async operation tasks and resets on every exit. `POST /api/projects/{project_id}/jobs/{job_id}/cancel` is owner-checked and idempotent; project payloads expose `active_job`. Persistent `cancel_requested` → `cancelling` → `cancelled` transitions and separate event/checkpoint dedupe keys work on both cancellation paths, with no automatic retry or extra attempt. Tool-boundary cancellation and finalization/UI safety remain JOB-06B/C.
-- [ ] **JOB-06B — Provider and process boundaries.** Check cancellation before and after async provider calls and between schema fallback/repair attempts. Replace duplicated subprocess waits with one bounded, redacting supervisor that races operation completion against cancellation and timeout. Cover npm, pip, venv creation, dependency probes, Playwright, runtime launch, and health waits. Terminate only the attempt-owned process group: graceful stop, bounded escalation, child reaping, and output-drain cleanup. Never stop an unrelated preview or an existing published runtime.
+- [x] **JOB-06B — Provider and process boundaries.** Provider requests abort in flight and stop before schema fallback or repair. `backend/app/jobs/processes.py` owns each spawned process group, races cancellation and timeout, bounds/redacts output, and handles graceful termination, bounded escalation, reaping, and output draining. npm, pip, venv creation, dependency probes, Vite builds, Playwright, runtime startup, and health waits use the shared supervisor or attempt-scoped ownership checks. Real child-process tests verify only the cancelled group is stopped; unrelated preview and published runtimes remain alive.
 - [ ] **JOB-06C — Finalization and UI safety.** Guard finalization with lease ownership, input hash, and cancellation state in one transaction. A cancelled attempt must not promote staging, create a version, finalize verification, or overwrite a release. Clean attempt-owned staging and temporary paths, emit exactly one terminal event, and preserve the last usable version. Add a busy-state cancel control with immediate `cancelling` feedback while polling remains available.
 
 **Primary files:** `backend/app/jobs/`, `backend/app/llm.py`, `backend/app/frontend_builder.py`, `backend/app/runtime.py`, `backend/app/verification/runner.py`, API schemas/routes, and Builder job controls.
@@ -254,3 +254,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-28 | BASE-01B deterministic quality metrics | 22/22 quality cases, schema 1.2 capture and legacy compatibility, real verification and publish gates, full regressions | 166 backend and 12 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-28 | BASE-01C repeatability and Milestone 0 | Two semantically identical quality captures, current 1.2 baseline validation, directional thresholds, clean and injected-regression CLI checks, full regressions | 169 backend and 12 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-28 | JOB-06A cancellation contract | Context/tool ownership, owner-scoped idempotent API, both cancellation paths, transition/event dedupe, and full regressions | 173 backend and 12 frontend unit tests passed; production build and Ruff clean |
+| 2026-10-28 | JOB-06B provider and process boundaries | Real owned/unrelated process-group cleanup, in-flight/fallback provider cancellation, timeout/redaction, runtime preservation, and full regressions | 178 backend and 12 frontend unit tests passed; production build and Ruff clean |
