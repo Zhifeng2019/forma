@@ -33,6 +33,55 @@ def test_follow_frames_tail_new_events_and_idle_heartbeats():
     asyncio.run(scenario())
 
 
+def test_follow_frames_delivers_events_before_idle_heartbeat():
+    user_id = 950001
+    project_id = make_project(user_id)
+    with workspace_db(user_id) as db:
+        job_id, _ = create_job(db, project_id, 'build', 'input-hash', 'advance-stage', uuid.uuid4().hex)
+        record_event(db, job_id, 'job.started', {'attempt_id': 1}, '1:started')
+
+    async def scenario():
+        stream = follow_frames(user_id, project_id, 0, 200, 60, poll_seconds=0.01)
+        assert await anext(stream) == ': heartbeat\n\n'
+        assert await anext(stream) == 'retry: 1500\n\n'
+        first = await anext(stream)
+        assert 'job.started' in first
+        with workspace_db(user_id) as db:
+            record_event(db, job_id, 'job.succeeded', {'attempt_id': 1}, '1:succeeded')
+        second = await asyncio.wait_for(anext(stream), timeout=0.1)
+        first_id = int(first.splitlines()[0].removeprefix('id: '))
+        second_id = int(second.splitlines()[0].removeprefix('id: '))
+        assert 'job.succeeded' in second and second_id == first_id + 1
+        await stream.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_follow_endpoint_preserves_cursor_for_initial_replay(monkeypatch):
+    with TestClient(app) as client:
+        account = register(client, 'follow-initial-replay')
+        project_id = make_project(account['user']['id'])
+        with workspace_db(account['user']['id']) as db:
+            job_id, _ = create_job(db, project_id, 'build', 'input-hash', 'advance-stage', uuid.uuid4().hex)
+            record_event(db, job_id, 'job.started', {'attempt_id': 1}, '1:started')
+
+        from app.jobs.events import replay_frames
+        received = {}
+
+        def finite_follow(_user, project, cursor, _limit, _heartbeat):
+            received['cursor'] = cursor
+            return replay_frames([], project, cursor)
+
+        monkeypatch.setattr('app.api.follow_frames', finite_follow)
+        response = client.get(
+            f'/api/projects/{project_id}/events?follow=true&heartbeat_seconds=60',
+            headers=auth(account['token']),
+        )
+        assert response.status_code == 200
+        assert received['cursor'] == 0
+        assert response.headers['x-event-cursor'] == '1'
+
+
 def test_follow_endpoint_streams_live_and_validates_cursor(monkeypatch):
     with TestClient(app) as client:
         account = register(client, 'follow-endpoint')

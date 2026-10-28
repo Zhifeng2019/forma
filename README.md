@@ -92,6 +92,8 @@ The v1.4 work is additive and disabled by default. Task status and acceptance ev
 - Finalization checks worker ownership, input hash, and cancellation state atomically. Cancellation restores pre-attempt project/version state and prior verification reports, prevents cancelled verification from being published, and provides a Builder cancel button with immediate `cancelling` feedback and polling.
 - Owner-scoped SSE replay uses versioned envelopes with persisted numeric event IDs, redacted payloads, `Last-Event-ID`/`after` cursors, bounded pages, heartbeat/reconnect hints, and `stream.complete`. `job.started`, `job.succeeded`, and `project.refresh` complement existing checkpoints and terminal events without exposing bearer tokens in URLs.
 - Live `follow=true` streams tail persisted events without holding SQLite connections across waits. The Builder’s abortable `useProjectEvents` subscription tracks monotonic cursors, resumes with `Last-Event-ID`, applies bounded backoff, refreshes immediately on project/report/cancellation events, and closes on navigation, completion, and shutdown.
+- Live streams replay from the requested cursor without skipping existing events, poll for new persisted events every 250 ms, and retain 15-second idle heartbeats. Network-side aborts reconnect; only disposal stops the subscription.
+- Project payloads advertise durable-job support so legacy projects remain polling-only. Disconnected or unsupported streams use 1.5-second polling, while healthy SSE reconciles the authoritative project snapshot every 30 seconds. Expired cursors reload that snapshot before replay resumes; monotonic event IDs and idempotent jobs avoid duplicate versions.
 - AppSpec v1 provides schema-aware provider proposals with a structured-JSON fallback, one bounded semantic repair, a typed contract, deterministic single-entity CRUD source synthesis, and a legacy adapter.
 - With `APPSPEC_V1` enabled, builds, refinements, and migrations compile from AppSpec and persist `appspec.json` plus `build-manifest.json`. The v1 compiler supports one entity and reviewed collection CRUD routes; flag-off behavior preserves the existing generators.
 - Planning creates a version-0 AppSpec draft for the Contract review panel. Plan feedback and pre-build architecture changes revise the draft, and invalid contracts are blocked before compilation.
@@ -99,7 +101,7 @@ The v1.4 work is additive and disabled by default. Task status and acceptance ev
 - The deterministic verifier produces durable reports with spec/source hashes, tool-run IDs, durations, blocked/failed details, full-coverage `can_publish` evaluation, and forced retry support. The Verification panel presents this evidence and refreshes deferred runs automatically.
 - With `ACCEPTANCE_GATE_V1` and `APPSPEC_V1` enabled, every new publish requires a fresh full required-check run. Failed verification does not replace or unpublish the existing release; republishing the already-live version remains idempotent.
 - Public deployments resolve through the control-plane registry with write-through publish, republish, unpublish, and delete synchronization and backfilled version-specific architecture. Public lookup no longer scans every user database.
-- Broader multi-entity synthesis, polling fallback and reconciliation, usage telemetry, specialist workers, and sandboxing remain separate tracked tasks.
+- Broader multi-entity synthesis, usage telemetry, specialist workers, and sandboxing remain separate tracked tasks.
 
 Regenerate the evaluation baseline with:
 

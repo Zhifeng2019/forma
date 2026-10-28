@@ -262,6 +262,7 @@ def project_payload(user_id, project_id):
             ORDER BY version DESC LIMIT 1''', (project_id,)).fetchone()
         result.update(appspec_review(spec['content'] if spec else None))
         result['appspec_enabled'] = feature_enabled(FeatureFlag.APPSPEC_V1)
+        result['durable_jobs_enabled'] = feature_enabled(FeatureFlag.DURABLE_JOBS_V1)
         result.update(verification_payload(user_id, project_id, result['current_version']))
         result['active_job'] = active_job(db, project_id)
         result['published_url'] = f'/apps/{project_id}/' if result['published_version'] else None
@@ -324,13 +325,14 @@ def project_events(
         raise HTTPException(422, 'Event cursor must be a non-negative integer') from exc
     if cursor < 0:
         raise HTTPException(422, 'Event cursor must be a non-negative integer')
+    requested_cursor = cursor
     with workspace_db(user['id']) as db:
         high = high_watermark(db, project_id)
         if cursor > high:
             raise HTTPException(409, {'error': 'cursor_expired', 'high_watermark': high})
         events = replay_events(db, project_id, cursor, limit)
     cursor = events[-1]['id'] if events else cursor
-    frames = (follow_frames(user['id'], project_id, cursor, limit, heartbeat_seconds)
+    frames = (follow_frames(user['id'], project_id, requested_cursor, limit, heartbeat_seconds)
               if follow else replay_frames(events, project_id, cursor))
     return StreamingResponse(
         frames,

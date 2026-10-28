@@ -56,6 +56,7 @@ export type Project = {
   messages: Message[]; artifacts: Artifact[]; versions: Version[]; events: StudioEvent[]; active_job?: ActiveJob | null
   appspec_enabled?: boolean; appspec?: AppSpecEnvelope | null
   appspec_valid?: boolean | null; appspec_error?: string | null
+  durable_jobs_enabled?: boolean
   verification?: VerificationReport | null; verification_running?: boolean
 }
 export type Selection = { selector: string; text: string } | null

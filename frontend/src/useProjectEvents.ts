@@ -21,9 +21,6 @@ const decoder = new TextDecoder()
 function abortError() {
   return new DOMException('The event stream was aborted', 'AbortError')
 }
-function isAbort(error: unknown) {
-  return error instanceof DOMException && error.name === 'AbortError'
-}
 function delay(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     const timer = globalThis.setTimeout(() => {
@@ -65,8 +62,8 @@ export class ProjectEventStream {
     while (this.active) {
       try {
         await this.connect()
-      } catch (error) {
-        if (!this.active || isAbort(error)) break
+      } catch {
+        if (!this.active) break
         this.status(false)
       }
       if (!this.active) break
@@ -100,7 +97,15 @@ export class ProjectEventStream {
     const response = await fetchFn(`/api/projects/${this.projectId}/events?follow=true&heartbeat_seconds=15`, {
       headers, signal: this.controller.signal,
     })
-    if (response.status === 401) { this.stop(); return }
+    if (response.status === 401 || response.status === 404) { this.stop(); return }
+    if (response.status === 409) {
+      this.status(false)
+      const detail = await response.json().catch(() => ({}))
+      const highWatermark = Number(detail.detail?.high_watermark ?? 0)
+      this.cursor = Math.max(0, Math.min(this.cursor, highWatermark))
+      await this.options.onRefresh()
+      return
+    }
     if (!response.ok) throw new Error(`Event stream failed (${response.status})`)
     if (!response.body) throw new Error('Event stream body is unavailable')
     this.status(true)

@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-28
 
-**Current focus:** JOB-05C — polling fallback and fault coverage (next slice; not started)
+**Current focus:** JOB-07A — shared tool-run envelope (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -92,17 +92,17 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 - [x] **JOB-02 — Leasing and idempotency.** Stable keys, guarded attempts, heartbeat, expiration recovery, cancellation, and stale-finalization checks are covered by `test_job_service.py`.
 - [x] **JOB-03 — Durable generation runner.** Stage generation, document revision, and architecture migration use `backend/app/jobs/runner.py` when enabled. `complete_package` remains inside its parent stage job by design.
 - [x] **JOB-04 — Preserve synchronous and deferred behavior.** Engine wrappers route deferred and synchronous work through the durable runner under `DURABLE_JOBS_V1`; legacy scheduling remains the fallback.
-- [ ] **JOB-05 — Resumable event delivery — Partial.** Versioned replay and live reconnect are complete. Add polling fallback, authoritative reconciliation, and fault coverage.
+- [x] **JOB-05 — Resumable event delivery.** Versioned replay, live delivery, reconnect, polling fallback, authoritative reconciliation, and fault coverage are complete.
 - [x] **JOB-06 — End-to-end cooperative cancellation.** Cancellation is owner-scoped and idempotent, with attempt-scoped context, provider/process cleanup, atomic finalization guards, rollback of attempt-owned source and reports, and a busy-state Builder cancel control.
 - [ ] **JOB-07 — Usage and provenance tracking.** Wire provider/model, tokens, cost, retries, build duration, runtime health, and source hashes into tool runs and the usage ledger.
 
-**Milestone gate:** `[ ]` Polling fallback and telemetry remain open; cancellation is complete.
+**Milestone gate:** `[ ]` Telemetry remains open; event delivery and cancellation are complete.
 
-**Deferred by design:** BASE-01, BASE-03, and JOB-06 are complete. JOB-05 still needs polling fallback and fault coverage, and JOB-07 still needs provider token/cost telemetry. These remain deliberate follow-ups before specialist workers, not completed capabilities and not forgotten tasks.
+**Deferred by design:** BASE-01, BASE-03, JOB-05, and JOB-06 are complete. JOB-07 still needs provider token/cost telemetry. It remains a deliberate follow-up before specialist workers, not a completed capability or a forgotten task.
 
 ## Next checkpoint — BASE/JOB pre-specialist readiness
 
-**Checkpoint status:** `[ ]` In progress — BASE-01, BASE-03, JOB-06, and JOB-05A/B are complete; JOB-05C is the next review slice.
+**Checkpoint status:** `[ ]` In progress — BASE-01, BASE-03, JOB-06, and JOB-05A–C are complete; JOB-07A is the next review slice.
 
 **Starting revision:** `a706e5a` (`Gate new releases with deterministic verification`).
 
@@ -155,7 +155,7 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 
 - [x] **JOB-05A — Versioned replay contract.** `backend/app/jobs/events.py` defines schema 1.0 envelopes with numeric IDs, job/attempt IDs, types, timestamps, and recursively redacted payloads. Owner-checked `GET /api/projects/{project_id}/events` supports `Last-Event-ID` and `after`, bounded ordered replay, cursor-expiry responses, heartbeat/reconnect hints, and `stream.complete` with `X-Event-Cursor`. Lifecycle writes add `job.started`, `job.succeeded`, and `project.refresh` while preserving historical checkpoints and terminal events; no bearer tokens appear in URLs.
 - [x] **JOB-05B — Live delivery and reconnect.** `follow=true` tails persisted events with idle heartbeats and no SQLite connection held across awaits. Invalid/expired cursors fail before streaming for project reconciliation. `ProjectEventStream` and `useProjectEvents` maintain one abortable subscription per mounted project, monotonic cursor dedupe, bounded reconnect delay, and sequential refresh on project/report/cancellation events. Reader and timer cancellation cover navigation, completion, logout, and shutdown; tests verify resume-after-disconnect and abort cleanup.
-- [ ] **JOB-05C — Polling fallback and fault coverage.** Retain the existing polling path for legacy generation, unsupported streams, and stream failure; avoid overlapping poll/SSE refresh loops and duplicate versions/messages. Periodically reconcile the authoritative project payload even when SSE is healthy. Test replay across multiple jobs and attempts, reconnect after a dropped connection, cursor expiry, ownership isolation, heartbeat, offline fallback, shutdown cleanup, and deferred autopilot without duplicate versions.
+- [x] **JOB-05C — Polling fallback and fault coverage.** Legacy projects remain polling-only through the explicit durable-job capability flag; disconnected or unsupported streams poll every 1.5 seconds, while healthy SSE reconciles the authoritative project payload every 30 seconds. Live replay preserves the requested cursor before tailing, and persisted-event polling runs every 250 ms independently of 15-second idle heartbeats. Shared in-flight loading, monotonic cursors, cursor-expiry snapshot reconciliation, bounded reconnect, and distinct network-abort/disposal handling prevent duplicate transitions. Tests cover replay across jobs and attempts, checkpoint-close recovery, cursor expiry, ownership isolation, heartbeat timing, shutdown cleanup, offline fallback, and deferred autopilot without duplicate versions.
 
 **Primary files:** `backend/app/jobs/service.py`, a new event stream service/route, `backend/app/jobs/runner.py`, `frontend/src/useProjectEvents.ts`, and Builder polling/integration tests.
 
@@ -258,3 +258,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-28 | JOB-06C finalization and UI safety | Version/report rollback, worker/cancel guards, cancelled-outcome rejection, immediate Builder feedback, and full regressions | 182 backend and 13 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-28 | JOB-05A versioned event replay | Ordered bounded SSE, redaction, cursor expiry, owner isolation, lifecycle/refresh events, and full regressions | 185 backend and 13 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-28 | JOB-05B live delivery and reconnect | Live tailing, cursor resume after disconnect, bounded backoff, immediate refresh, abort cleanup, and full regressions | 187 backend and 15 frontend unit tests passed; production build and Ruff clean |
+| 2026-10-28 | JOB-05C polling fallback and fault coverage | Two repeatable quality evaluations, initial live replay, prompt persisted-event polling, cursor-expiry reconciliation, checkpoint-close recovery, deferred autopilot, and full regressions | 191 backend and 16 frontend unit tests passed; 2 event browser journeys passed; production build and Ruff clean |

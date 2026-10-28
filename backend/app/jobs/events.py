@@ -98,17 +98,22 @@ def replay_frames(events: list[dict], project_id: str, after: int):
 
 async def follow_frames(
     user_id: int, project_id: str, after: int, limit: int, heartbeat_seconds: float,
+    poll_seconds: float = 0.25,
 ):
     """Tail persisted events without retaining a database connection across awaits."""
     yield ': heartbeat\n\n'
     yield 'retry: 1500\n\n'
     cursor = after
+    idle_seconds = 0.0
     while True:
         with workspace_db(user_id) as db:
             events = replay_events(db, project_id, cursor, limit)
         for event in events:
             cursor = event['id']
             yield sse_frame(event)
-        if not events:
+        if not events and idle_seconds >= heartbeat_seconds:
             yield ': heartbeat\n\n'
-        await asyncio.sleep(heartbeat_seconds)
+            idle_seconds = 0.0
+        delay = min(poll_seconds, heartbeat_seconds)
+        await asyncio.sleep(delay)
+        idle_seconds += delay

@@ -30,6 +30,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   const [project, setProject] = useState<Project | null>(null)
   const [tab, setTab] = useState<Tab>('preview')
   const [busy, setBusy] = useState(false)
+  const [eventConnected, setEventConnected] = useState(false)
   const [cancelPending, setCancelPending] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -46,12 +47,18 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   const [viewVersion, setViewVersion] = useState<number | null>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const chatEnd = useRef<HTMLDivElement>(null)
+  const loadRequest = useRef<Promise<void> | null>(null)
 
-  const load = useCallback(() => api<Project>(`/projects/${id}`).then(data => {
-    setProject(data)
-    const documents = data.artifacts.filter(artifact => artifact.path.endsWith('.md'))
-    if (documents.length && !documents.some(artifact => artifact.path === docPath)) setDocPath(documents[0].path)
-  }).catch(reason => setError(reason.message)), [id, docPath])
+  const load = useCallback(() => {
+    if (loadRequest.current) return loadRequest.current
+    const request = api<Project>(`/projects/${id}`).then(data => {
+      setProject(data); setError('')
+      const documents = data.artifacts.filter(artifact => artifact.path.endsWith('.md'))
+      if (documents.length && !documents.some(artifact => artifact.path === docPath)) setDocPath(documents[0].path)
+    }).catch(reason => setError(reason.message)).finally(() => { loadRequest.current = null })
+    loadRequest.current = request
+    return request
+  }, [id, docPath])
   useEffect(() => { void load() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!project) return
@@ -81,9 +88,9 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
       } finally { refreshing = false }
     }
     void refresh()
-    const timer = window.setInterval(() => { void refresh() }, 1500)
+    const timer = window.setInterval(() => { void refresh() }, eventConnected ? 30_000 : 1500)
     return () => { active = false; window.clearInterval(timer) }
-  }, [id, busy, project?.status, project?.stage, project?.auto_mode, project?.verification_running])
+  }, [id, busy, eventConnected, project?.status, project?.stage, project?.auto_mode, project?.verification_running])
   useEffect(() => {
     if (project?.stage === 'build' && project.current_version === 0 && project.appspec_enabled && project.appspec) setTab('contract')
   }, [project?.stage, project?.current_version, project?.appspec_enabled, project?.appspec])
@@ -97,9 +104,10 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   }, [])
   useEffect(() => { frameRef.current?.contentWindow?.postMessage({ type: 'forma-picker', enabled: picking }, '*') }, [picking, previewKey])
 
-  const eventEnabled = Boolean(project && (busy || project.status === 'working' || project.verification_running))
+  const autopilotInProgress = Boolean(project?.auto_mode && project.status !== 'error' && ['discovery', 'design', 'plan', 'build'].includes(project.stage))
+  const eventEnabled = Boolean(project && (project.durable_jobs_enabled || project.verification_running) && (busy || autopilotInProgress || project.status === 'working' || project.verification_running))
   const eventRefresh = useCallback(async () => { await load() }, [load])
-  useProjectEvents(id, eventEnabled, eventRefresh)
+  useProjectEvents(id, eventEnabled, eventRefresh, setEventConnected)
 
   if (!project) return <div className="app-loading"><LogoMark /><span>{error || 'Preparing your workspace…'}</span>{error && <button className="button secondary" onClick={() => navigate('/')}>Back to projects</button>}</div>
   const stage = stages[project.stage_index] || stages[0]
