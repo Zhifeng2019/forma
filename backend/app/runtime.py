@@ -21,8 +21,9 @@ from .config import settings
 from .engine import validate_project_id
 from .frontend_builder import PackageBuildError, write_source_files
 from .jobs.context import current_job_context
+from .jobs.idempotency import canonical_input_hash
 from .jobs.models import JobCancelledError
-from .jobs.processes import run_process
+from .jobs.processes import executable_version, run_process
 from .jobs.tool_runs import finish_tool_run, start_tool_run
 
 
@@ -97,19 +98,44 @@ class RuntimeManager:
         requirements: str,
         source_format: str = 'single-file',
         files: dict[str, str] | None = None,
+        spec_hash: str | None = None,
     ) -> ManagedRuntime:
         key = self._key(project_id, version, channel)
+        source_files = files if files is not None else {
+            'backend/main.py': source, 'backend/requirements.txt': requirements,
+        }
+        source_files = {path: content for path, content in source_files.items()
+                        if path not in {'appspec.json', 'build-manifest.json'} and not path.startswith('acceptance/')}
+        source_hash = canonical_input_hash(source_files)
+        package_hash = hashlib.sha256((runtime_requirements(requirements) + source_format).encode()).hexdigest()
+        input_data = {
+            'project_id': project_id, 'version': version, 'channel': channel,
+            'source_hash': source_hash, 'package_hash': package_hash,
+        }
+        telemetry = {
+            'spec_hash': spec_hash, 'source_hash': source_hash,
+            'provenance': {'package_hash': package_hash},
+        }
+
+        def reuse(runtime):
+            run = start_tool_run(
+                'runtime.reuse', 'uvicorn', input_data,
+                provenance={'package_hash': package_hash, 'cache_hit': True},
+                spec_hash=spec_hash, source_hash=source_hash,
+            )
+            runtime.last_used = time.monotonic()
+            finish_tool_run(run, 'succeeded')
+            return runtime
+
         existing = self._runtimes.get(key)
         if existing and existing.process.returncode is None:
-            existing.last_used = time.monotonic()
-            return existing
+            return reuse(existing)
         self._starting.add(key)
         try:
             async with self._lock(project_id):
                 existing = self._runtimes.get(key)
                 if existing and existing.process.returncode is None:
-                    existing.last_used = time.monotonic()
-                    return existing
+                    return reuse(existing)
                 if existing:
                     await self._stop(key)
                 source_dir = self._materialize(project_id, version, source, requirements, source_format, files)
@@ -120,12 +146,16 @@ class RuntimeManager:
                         if runtime.project_id == project_id and runtime.channel == 'preview':
                             await self._stop(other_key)
                 await self._make_capacity(key)
-                environment = await self._ensure_environment(project_id, runtime_requirements(requirements))
-                return await self._start(key, project_id, version, channel, environment, source_dir)
+                environment = await self._ensure_environment(
+                    project_id, runtime_requirements(requirements), telemetry,
+                )
+                return await self._start(key, project_id, version, channel, environment, source_dir, telemetry)
         finally:
             self._starting.discard(key)
 
-    async def _ensure_environment(self, project_id: str, requirements: str) -> Path:
+    async def _ensure_environment(
+        self, project_id: str, requirements: str, telemetry: dict | None = None,
+    ) -> Path:
         root, environment, _source, work = self._paths(project_id, 1)
         python = environment / 'bin' / 'python'
         base_python = settings.runtime_python or sys.executable
@@ -134,46 +164,81 @@ class RuntimeManager:
             settings.runtime_pip_index_url,
         ))
         digest = hashlib.sha256(contract.encode()).hexdigest()
-        root.mkdir(parents=True, exist_ok=True)
-        env = self._clean_environment(work, environment)
-        if not python.exists():
-            await self._run_install(
-                [base_python, '-m', 'venv', str(environment)],
-                'create the application Python environment', env, work,
-            )
-        # Generated apps must never inherit the studio or machine site-packages.
-        venv_config = environment / 'pyvenv.cfg'
-        if venv_config.exists():
-            venv_config.write_text(venv_config.read_text().replace(
-                'include-system-site-packages = true', 'include-system-site-packages = false',
-            ))
-        for stale_link in environment.glob('lib/python*/site-packages/_forma_verified_studio.pth'):
-            stale_link.unlink()
-        requirements_file = root / 'requirements.current.txt'
-        requirements_file.write_text(requirements)
-        matches, dependency_detail = await self._dependencies_match(python, requirements_file, env, work)
-        if not matches:
-            try:
+        telemetry = telemetry or {}
+        base_provenance = telemetry.get('provenance', {})
+        environment_run = start_tool_run(
+            'runtime.environment', 'python-venv-v1', {'requirements_hash': digest},
+            provenance={**base_provenance, 'requirements_hash': digest},
+            spec_hash=telemetry.get('spec_hash'), source_hash=telemetry.get('source_hash'),
+        )
+        created = False
+        installed = False
+
+        def step(operation):
+            return {
+                'spec_hash': telemetry.get('spec_hash'), 'source_hash': telemetry.get('source_hash'),
+                'telemetry_input': {'requirements_hash': digest, 'operation': operation},
+                'provenance': {**base_provenance, 'requirements_hash': digest, 'operation': operation},
+            }
+
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            env = self._clean_environment(work, environment)
+            if not python.exists():
+                created = True
                 await self._run_install(
-                    [str(python), '-m', 'pip', '--isolated', 'install',
-                     '--index-url', settings.runtime_pip_index_url,
-                     '--disable-pip-version-check', '--no-input', '--force-reinstall',
-                     '-r', str(requirements_file)],
-                    'install the application dependencies into its virtual environment',
-                    env, work, timeout=settings.runtime_install_timeout,
+                    [base_python, '-m', 'venv', str(environment)],
+                    'create the application Python environment', env, work, telemetry=step('venv'),
                 )
-            except RuntimeLaunchError as exc:
-                raise RuntimeLaunchError(f'{exc} Dependency check: {dependency_detail}') from exc
-        matches, dependency_detail = await self._dependencies_match(python, requirements_file, env, work)
-        if not matches:
-            raise RuntimeLaunchError(
-                f'Packages are not correctly installed inside the application virtual environment: {dependency_detail}'
+            # Generated apps must never inherit the studio or machine site-packages.
+            venv_config = environment / 'pyvenv.cfg'
+            if venv_config.exists():
+                venv_config.write_text(venv_config.read_text().replace(
+                    'include-system-site-packages = true', 'include-system-site-packages = false',
+                ))
+            for stale_link in environment.glob('lib/python*/site-packages/_forma_verified_studio.pth'):
+                stale_link.unlink()
+            requirements_file = root / 'requirements.current.txt'
+            requirements_file.write_text(requirements)
+            matches, dependency_detail = await self._dependencies_match(
+                python, requirements_file, env, work, telemetry=step('dependency-probe'),
             )
-        (environment / '.forma-requirements.sha256').write_text(digest)
-        return python
+            if not matches:
+                installed = True
+                try:
+                    await self._run_install(
+                        [str(python), '-m', 'pip', '--isolated', 'install',
+                         '--index-url', settings.runtime_pip_index_url,
+                         '--disable-pip-version-check', '--no-input', '--force-reinstall',
+                         '-r', str(requirements_file)],
+                        'install the application dependencies into its virtual environment',
+                        env, work, timeout=settings.runtime_install_timeout, telemetry=step('dependency-install'),
+                    )
+                except RuntimeLaunchError as exc:
+                    raise RuntimeLaunchError(f'{exc} Dependency check: {dependency_detail}') from exc
+            matches, dependency_detail = await self._dependencies_match(
+                python, requirements_file, env, work, telemetry=step('dependency-probe'), retry_count=1,
+            )
+            if not matches:
+                raise RuntimeLaunchError(
+                    f'Packages are not correctly installed inside the application virtual environment: {dependency_detail}'
+                )
+            (environment / '.forma-requirements.sha256').write_text(digest)
+            finish_tool_run(environment_run, 'succeeded', provenance={
+                'cache_hit': not created and not installed,
+                'python_version': executable_version(str(python)), 'dependency_detail': dependency_detail,
+            })
+            return python
+        except (JobCancelledError, asyncio.CancelledError) as exc:
+            finish_tool_run(environment_run, 'cancelled', error=str(exc))
+            raise
+        except Exception as exc:
+            finish_tool_run(environment_run, 'failed', error=f'{type(exc).__name__}: {exc}')
+            raise
 
     async def _dependencies_match(
         self, python: Path, requirements: Path, env: dict[str, str], cwd: Path,
+        telemetry: dict | None = None, retry_count: int = 0,
     ) -> tuple[bool, str]:
         script = (
             'import importlib,importlib.metadata,pathlib,sys,sysconfig\n'
@@ -198,7 +263,7 @@ class RuntimeManager:
         try:
             result = await run_process(
                 [str(python), '-c', script, str(requirements)], cwd, env, 20,
-                'verify the application dependencies',
+                'verify the application dependencies', retry_count=retry_count, **(telemetry or {}),
             )
         except TimeoutError:
             return False, 'dependency verification timed out'
@@ -214,9 +279,10 @@ class RuntimeManager:
         env: dict[str, str],
         cwd: Path,
         timeout: int = 120,
+        telemetry: dict | None = None,
     ) -> None:
         try:
-            result = await run_process(command, cwd, env, timeout, action)
+            result = await run_process(command, cwd, env, timeout, action, **(telemetry or {}))
         except TimeoutError as exc:
             raise RuntimeLaunchError(f'Timed out while trying to {action}. Please retry.') from exc
         if result.returncode:
@@ -245,15 +311,29 @@ class RuntimeManager:
         channel: str,
         python: Path,
         source_dir: Path,
+        telemetry: dict | None = None,
     ) -> ManagedRuntime:
         _root, environment, _source, work = self._paths(project_id, version)
         context = current_job_context()
         if context:
             context.raise_if_cancelled()
+        telemetry = telemetry or {}
+        python_version = executable_version(str(python))
+        telemetry['provenance'] = {
+            **telemetry.get('provenance', {}), 'python_version': python_version,
+        }
         launch = start_tool_run(
-            'runtime.launch', 'uvicorn',
-            {'project_id': project_id, 'version': version, 'channel': channel, 'source_dir': str(source_dir)},
-            provenance={'project_id': project_id, 'version': version, 'channel': channel},
+            'runtime.launch', python_version,
+            {
+                'project_id': project_id, 'version': version, 'channel': channel, 'source_dir': str(source_dir),
+                'source_hash': telemetry.get('source_hash'),
+                'package_hash': telemetry['provenance'].get('package_hash'),
+            },
+            provenance={
+                'project_id': project_id, 'version': version, 'channel': channel,
+                'server': 'uvicorn', **telemetry['provenance'],
+            },
+            spec_hash=telemetry.get('spec_hash'), source_hash=telemetry.get('source_hash'),
         )
         tool_run_id = launch.id if launch else f'runtime-start:{key}'
         port = self._free_port()
@@ -281,7 +361,7 @@ class RuntimeManager:
         )
         self._runtimes[key] = runtime
         try:
-            await self._wait_until_healthy(runtime)
+            await self._wait_until_healthy(runtime, telemetry)
         except JobCancelledError:
             await self._stop(key)
             raise
@@ -314,14 +394,23 @@ class RuntimeManager:
             if not logs or logs[-1] != 'Log stream closed':
                 logs.append('Log stream closed')
 
-    async def _wait_until_healthy(self, runtime: ManagedRuntime) -> None:
+    async def _wait_until_healthy(self, runtime: ManagedRuntime, telemetry: dict | None = None) -> None:
         url = f'http://127.0.0.1:{runtime.port}/api/health'
         deadline = time.monotonic() + settings.runtime_start_timeout
         context = current_job_context()
+        telemetry = telemetry or {}
         health = start_tool_run(
             'runtime.health', 'http.health.v1',
-            {'project_id': runtime.project_id, 'version': runtime.version, 'channel': runtime.channel, 'url': url},
-            provenance={'project_id': runtime.project_id, 'version': runtime.version, 'channel': runtime.channel},
+            {
+                'project_id': runtime.project_id, 'version': runtime.version, 'channel': runtime.channel, 'url': url,
+                'source_hash': telemetry.get('source_hash'),
+                'package_hash': telemetry.get('provenance', {}).get('package_hash'),
+            },
+            provenance={
+                'project_id': runtime.project_id, 'version': runtime.version, 'channel': runtime.channel,
+                **telemetry.get('provenance', {}),
+            },
+            spec_hash=telemetry.get('spec_hash'), source_hash=telemetry.get('source_hash'),
         )
         attempts = 0
         try:

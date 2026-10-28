@@ -2,9 +2,12 @@
 
 import asyncio
 from dataclasses import dataclass
+from functools import lru_cache
 import os
 from pathlib import Path
+import platform
 import signal
+import subprocess
 import uuid
 
 from .context import JobContext, current_job_context
@@ -49,6 +52,17 @@ async def terminate_process_group(process: asyncio.subprocess.Process, reader: a
     await reader
 
 
+@lru_cache(maxsize=32)
+def executable_version(executable: str) -> str:
+    try:
+        output = subprocess.check_output(
+            [executable, '--version'], stderr=subprocess.STDOUT, text=True, timeout=5,
+        )
+        return redact_output(output.strip().splitlines()[0])[:120] or 'unavailable'
+    except (OSError, subprocess.SubprocessError, IndexError):
+        return 'unavailable'
+
+
 async def run_process(
     command: list[str],
     cwd: Path,
@@ -58,6 +72,11 @@ async def run_process(
     context: JobContext | None = None,
     tool_run_id: str | None = None,
     output_limit: int = 8000,
+    retry_count: int = 0,
+    provenance: dict | None = None,
+    spec_hash: str | None = None,
+    source_hash: str | None = None,
+    telemetry_input=None,
 ) -> ProcessResult:
     if timeout <= 0:
         raise ValueError('Process timeout must be positive')
@@ -67,9 +86,16 @@ async def run_process(
     telemetry = None
     if tool_run_id is None:
         executable = Path(command[0]).name
+        version = executable_version(command[0])
+        metadata = {
+            'action': action, 'executable': executable, 'timeout_seconds': timeout,
+            'executable_version': version, 'studio_python_version': platform.python_version(),
+            'platform': platform.system(), **(provenance or {}),
+        }
         telemetry = start_tool_run(
-            action, executable, {'command': command, 'cwd': str(cwd), 'timeout': timeout},
-            provenance={'action': action, 'executable': executable, 'timeout_seconds': timeout},
+            action, version,
+            telemetry_input if telemetry_input is not None else {'command': command, 'cwd': str(cwd), 'timeout': timeout},
+            retry_count=retry_count, provenance=metadata, spec_hash=spec_hash, source_hash=source_hash,
         )
         if telemetry:
             tool_run_id = telemetry.id

@@ -9,8 +9,10 @@ import shutil
 import zipfile
 
 from .config import settings
-from .jobs.processes import run_process
-from .source_packages import frontend_package_json, frontend_vite_config
+from .jobs.idempotency import canonical_input_hash
+from .jobs.processes import executable_version, run_process
+from .jobs.tool_runs import finish_tool_run, start_tool_run
+from .source_packages import frontend_dependencies, frontend_package_json, frontend_vite_config
 from .spec.schema import SPEC_ARTIFACT_PATHS
 
 
@@ -79,11 +81,37 @@ def _promote_version(staging: Path, root: Path) -> None:
     _remove_tree(rejected)
 
 
+def _source_files(files: dict[str, str]) -> dict[str, str]:
+    return {path: content for path, content in files.items()
+            if path not in SPEC_ARTIFACT_PATHS and not path.startswith('acceptance/')}
+
+
+def _source_hash(files: dict[str, str]) -> str:
+    return canonical_input_hash(_source_files(files))
+
+
+def _package_hash() -> str:
+    return hashlib.sha256((frontend_package_json() + frontend_vite_config()).encode()).hexdigest()
+
+
 def _digest(files: dict[str, str]) -> str:
-    source = {path: content for path, content in files.items()
-              if path not in SPEC_ARTIFACT_PATHS and not path.startswith('acceptance/')}
-    payload = json.dumps(source, sort_keys=True) + frontend_package_json() + frontend_vite_config() + 'vite-react-package-v1'
+    payload = (json.dumps(_source_files(files), sort_keys=True) + frontend_package_json()
+               + frontend_vite_config() + 'vite-react-package-v1')
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _sync_step(tool_name, tool_version, input_data, operation, *, provenance, spec_hash=None, source_hash=None):
+    run = start_tool_run(
+        tool_name, tool_version, input_data, provenance=provenance,
+        spec_hash=spec_hash, source_hash=source_hash,
+    )
+    try:
+        result = operation()
+    except Exception as exc:
+        finish_tool_run(run, 'failed', error=f'{type(exc).__name__}: {exc}')
+        raise
+    finish_tool_run(run, 'succeeded')
+    return result
 
 
 def _node_binaries() -> tuple[str, str]:
@@ -106,9 +134,11 @@ def _environment(root: Path, node_modules: Path, node_binary: str) -> dict[str, 
     }
 
 
-async def _run(command: list[str], cwd: Path, env: dict[str, str], timeout: int, action: str) -> str:
+async def _run(
+    command: list[str], cwd: Path, env: dict[str, str], timeout: int, action: str, telemetry: dict | None = None,
+) -> str:
     try:
-        result = await run_process(command, cwd, env, timeout, action)
+        result = await run_process(command, cwd, env, timeout, action, **(telemetry or {}))
     except TimeoutError as exc:
         raise PackageBuildError(f'{action} timed out. Please retry.') from exc
     if result.returncode:
@@ -126,16 +156,25 @@ async def ensure_node_environment(user_id: int) -> Path:
     async with _node_locks.setdefault(user_id, asyncio.Lock()):
         package_json = frontend_package_json()
         digest = hashlib.sha256(package_json.encode()).hexdigest()
+        dependencies = frontend_dependencies()
         vite = root / 'node_modules' / '.bin' / 'vite'
         marker = root / '.forma-dependencies.sha256'
         if vite.exists() and marker.exists() and marker.read_text() == digest:
-            return root
+            return _sync_step(
+                'node.environment', executable_version(node),
+                {'package_hash': digest, 'dependency_versions': dependencies}, lambda: root,
+                provenance={'package_hash': digest, 'cache_hit': True, 'dependency_versions': dependencies},
+            )
         root.mkdir(parents=True, exist_ok=True)
         (root / 'package.json').write_text(package_json)
         env = _environment(root, root / 'node_modules', node)
         await _run(
             [npm, 'install', '--ignore-scripts', '--no-audit', '--no-fund'],
             root, env, settings.runtime_build_timeout, 'Reviewed npm dependency installation',
+            telemetry={
+                'telemetry_input': {'package_hash': digest, 'dependency_versions': dependencies},
+                'provenance': {'package_hash': digest, 'cache_hit': False, 'dependency_versions': dependencies},
+            },
         )
         if not vite.exists():
             raise PackageBuildError('The shared Node environment does not contain Vite after installation.')
@@ -147,19 +186,33 @@ async def ensure_node_environment(user_id: int) -> Path:
 
 
 async def ensure_frontend_build(
-    user_id: int, project_id: str, version: int, files: dict[str, str],
+    user_id: int, project_id: str, version: int, files: dict[str, str], spec_hash: str | None = None,
 ) -> str:
     root = version_directory(project_id, version)
     frontend = root / 'frontend'
     index = frontend / 'dist' / 'index.html'
     marker = frontend / 'dist' / '.forma-source.sha256'
     digest = _digest(files)
+    source_hash = _source_hash(files)
+    package_hash = _package_hash()
+    input_data = {'source_hash': source_hash, 'package_hash': package_hash, 'build_digest': digest}
+    provenance = {
+        'package_hash': package_hash, 'build_digest': digest,
+        'vite_version': frontend_dependencies()['vite'],
+    }
+
+    def cached():
+        return _sync_step(
+            'frontend.build', f'vite-{frontend_dependencies()["vite"]}', input_data, index.read_text,
+            provenance={**provenance, 'cache_hit': True}, spec_hash=spec_hash, source_hash=source_hash,
+        )
+
     if index.exists() and marker.exists() and marker.read_text() == digest:
-        return index.read_text()
+        return cached()
     key = f'{user_id}:{project_id}:v{version}'
     async with _build_locks.setdefault(key, asyncio.Lock()):
         if index.exists() and marker.exists() and marker.read_text() == digest:
-            return index.read_text()
+            return cached()
         _assert_immutable_source(root, files)
         staging = staging_directory(project_id, version)
         _remove_tree(staging)
@@ -167,18 +220,31 @@ async def ensure_frontend_build(
             node_root = await ensure_node_environment(user_id)
             node, npm = _node_binaries()
             shared_modules = node_root / 'node_modules'
-            _write_source_tree(staging, files)
+            _sync_step(
+                'frontend.staging', 'forma-builder-v1', input_data,
+                lambda: _write_source_tree(staging, files),
+                provenance={**provenance, 'cache_hit': False}, spec_hash=spec_hash, source_hash=source_hash,
+            )
             staged_frontend = staging / 'frontend'
             local_modules = staged_frontend / 'node_modules'
             local_modules.symlink_to(shared_modules, target_is_directory=True)
             env = _environment(staging, shared_modules, node)
-            await _run([npm, 'run', 'build'], staged_frontend, env,
-                       settings.runtime_build_timeout, 'Frontend production build')
+            await _run(
+                [npm, 'run', 'build'], staged_frontend, env, settings.runtime_build_timeout,
+                'Frontend production build', telemetry={
+                    'telemetry_input': input_data, 'spec_hash': spec_hash, 'source_hash': source_hash,
+                    'provenance': {**provenance, 'cache_hit': False},
+                },
+            )
             staged_index = staged_frontend / 'dist' / 'index.html'
             if not staged_index.exists():
                 raise PackageBuildError('Vite completed without producing frontend/dist/index.html.')
             (staged_frontend / 'dist' / '.forma-source.sha256').write_text(digest)
-            _promote_version(staging, root)
+            _sync_step(
+                'frontend.promotion', 'forma-builder-v1', input_data,
+                lambda: _promote_version(staging, root),
+                provenance={**provenance, 'cache_hit': False}, spec_hash=spec_hash, source_hash=source_hash,
+            )
         except Exception:
             _remove_tree(staging)
             raise

@@ -126,6 +126,7 @@ async def _add_runtime_environment(user_id: int, project_id: str, version: int, 
     runtime = await runtime_manager.ensure(
         project_id, version, 'preview', context['files'].get('backend/main.py', ''),
         context['files'].get('backend/requirements.txt', ''), context['source_format'], context['files'],
+        context['spec_hash'],
     )
     env['APP_BASE_URL'] = f'http://127.0.0.1:{runtime.port}'
     env['APP_RESTART_URL'] = f'{settings.studio_base_url.rstrip("/")}/api/projects/{project_id}/runtime/restart'
@@ -183,7 +184,7 @@ def _command_for_check(root: Path, check: dict) -> tuple[list[str], Path]:
 
 async def _run_studio_build(user_id: int, project_id: str, version: int, context: dict) -> None:
     if context['source_format'] == 'multi-file':
-        await ensure_frontend_build(user_id, project_id, version, context['files'])
+        await ensure_frontend_build(user_id, project_id, version, context['files'], context['spec_hash'])
         return
     write_source_files(project_id, version, context['files'])
     index = version_directory(project_id, version) / 'index.html'

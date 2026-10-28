@@ -23,7 +23,7 @@ def fake_node_environment(monkeypatch):
 
 
 def successful_build(calls):
-    async def run(command, cwd, _env, _timeout, _action):
+    async def run(command, cwd, _env, _timeout, _action, **_kwargs):
         calls.append((command, cwd))
         dist = cwd / 'dist'
         assets = dist / 'assets'
@@ -64,7 +64,7 @@ def test_failed_build_preserves_last_usable_version(monkeypatch):
     (dist / 'index.html').write_text('last usable version')
     files = local_source_package('Failure Check', 'Preserve previous version', 1, 'static')
 
-    async def fail(*_args):
+    async def fail(*_args, **_kwargs):
         raise PackageBuildError('Deliberate build failure')
 
     monkeypatch.setattr('app.frontend_builder._run', fail)

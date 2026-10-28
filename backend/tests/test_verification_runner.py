@@ -243,11 +243,20 @@ def test_live_package_verification_with_runtime_and_security():
     assert report['spec_hash'] == package.spec_hash and report['source_hash'] == package.source_hash
     assert asyncio.run(runtime_manager.status(project_id, 1))['status'] == 'stopped'
     with workspace_db(user_id) as db:
-        runtime_runs = db.execute('''SELECT tool_name,status FROM tool_runs WHERE job_id=?
+        runtime_runs = db.execute('''SELECT tool_name,status,provenance FROM tool_runs WHERE job_id=?
             AND tool_name IN ('runtime.launch','runtime.health') ORDER BY rowid''', (report['job_id'],)).fetchall()
+        environment_run = db.execute('''SELECT provenance FROM tool_runs WHERE job_id=?
+            AND tool_name='runtime.environment' ''', (report['job_id'],)).fetchone()
     assert [(row['tool_name'], row['status']) for row in runtime_runs] == [
         ('runtime.launch', 'succeeded'), ('runtime.health', 'succeeded'),
     ]
+    for row in runtime_runs:
+        provenance = json.loads(row['provenance'])
+        assert provenance['spec_hash'] == package.spec_hash and provenance['source_hash'] == package.source_hash
+        assert provenance['package_hash'] and provenance['python_version']
+    environment = json.loads(environment_run['provenance'])
+    assert environment['spec_hash'] == package.spec_hash and environment['source_hash'] == package.source_hash
+    assert environment['requirements_hash'] and isinstance(environment['cache_hit'], bool)
 
 
 def test_single_file_verification_materializes_source_before_build():
