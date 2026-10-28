@@ -4,6 +4,7 @@ import re
 import httpx
 from .jobs.context import current_job_context
 from .jobs.models import JobCancelledError
+from .jobs.usage import record_observed_completion
 from .security import decrypt_secret
 
 
@@ -84,14 +85,15 @@ async def _post_with_cancellation(client, url, kwargs, tool_metadata=None):
         response = await request
         if context:
             context.raise_if_cancelled()
+        finished = None
         if run:
             succeeded = response.status_code < 400
-            finish_tool_run(
+            finished = finish_tool_run(
                 run, 'succeeded' if succeeded else 'failed',
                 provenance={'http_status': response.status_code},
                 error=None if succeeded else f'Provider HTTP {response.status_code}',
             )
-        return response
+        return response, finished
     except (JobCancelledError, asyncio.CancelledError) as exc:
         if run:
             finish_tool_run(run, 'cancelled', error=f'{type(exc).__name__}: {exc}')
@@ -124,8 +126,10 @@ async def _complete(
         async with httpx.AsyncClient(timeout=240, trust_env=False) as client:
             attempt = 0
             request_sequence = 0
+            request_reason = 'initial'
+            reason_detail = None
             while attempt <= OUTPUT_REPAIR_ATTEMPTS:
-                response = await _post_with_cancellation(client, url, {
+                response, tool_run = await _post_with_cancellation(client, url, {
                     'headers': {'Authorization': f'Bearer {decrypt_secret(provider["api_key_encrypted"])}'},
                     'json': {'model': provider['model'], 'messages': messages,
                              'temperature': 0.35, 'response_format': response_format,
@@ -142,11 +146,17 @@ async def _complete(
                         'schema_name': response_format.get('json_schema', {}).get('name'),
                     },
                 })
+                record_observed_completion(
+                    provider, response, tool_run, response_format=response_format,
+                    request_reason=request_reason, reason_detail=reason_detail, retry_count=request_sequence,
+                )
                 request_sequence += 1
                 if response.status_code >= 400:
                     if (allow_json_fallback and response_format.get('type') == 'json_schema'
                             and response.status_code in {400, 404, 422}):
                         response_format = {'type': 'json_object'}
+                        request_reason = 'schema_fallback'
+                        reason_detail = f'HTTP {response.status_code}'
                         continue
                     raise GenerationError(f'Provider returned {response.status_code}: {response.text[:300]}')
                 payload = response.json()
@@ -179,6 +189,8 @@ async def _complete(
                         'the output budget. Do not add commentary or Markdown fences.'
                     )},
                 ]
+                request_reason = 'output_repair'
+                reason_detail = reason
                 attempt += 1
         raise GenerationError('The model did not return a usable structured response.')
     except JobCancelledError:

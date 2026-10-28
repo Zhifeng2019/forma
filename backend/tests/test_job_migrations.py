@@ -25,9 +25,14 @@ def test_additive_job_schema_and_published_registry_backfill():
         assert registry['source_format'] == 'multi-file'
         tables = {row['name'] for row in control.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert 'deployment_registry' in tables
+        provider_columns = {row['name'] for row in control.execute('PRAGMA table_info(providers)')}
+        assert {'input_price_per_million', 'output_price_per_million', 'currency'} <= provider_columns
     with workspace_db(user_id) as workspace:
         tables = {row['name'] for row in workspace.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {'generation_jobs', 'job_attempts', 'job_events', 'tool_runs', 'usage_ledger'} <= tables
+        usage_columns = {row['name'] for row in workspace.execute('PRAGMA table_info(usage_ledger)')}
+        assert {'usage_status', 'cost_status', 'total_tokens', 'provider_request_id', 'finish_reason',
+                'input_price_per_million', 'output_price_per_million', 'currency'} <= usage_columns
     init_databases()
     with control_db() as control:
         assert control.execute('SELECT COUNT(*) FROM deployment_registry WHERE project_id=?', (project_id,)).fetchone()[0] == 1

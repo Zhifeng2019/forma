@@ -79,12 +79,15 @@ def test_admin_provider_and_user_controls():
     response = client.post('/api/providers', headers=auth(admin['token']), json={
         'name': 'Test provider', 'base_url': 'https://api.example.com/v1',
         'model': 'test-model', 'api_key': 'secret-key', 'enabled': True,
+        'input_price_per_million': 1.5, 'output_price_per_million': 3, 'currency': 'usd',
     })
     assert response.status_code == 200
     provider_id = response.json()['id']
     providers = client.get('/api/providers', headers=auth(admin['token'])).json()
     provider = next(p for p in providers if p['id'] == provider_id)
     assert provider['has_key'] is True
+    assert provider['input_price_per_million'] == 1.5 and provider['output_price_per_million'] == 3
+    assert provider['currency'] == 'USD'
     assert 'api_key_encrypted' not in provider
     users = client.get('/api/admin/users', headers=auth(admin['token'])).json()
     assert any(u['email'] == 'maker@example.com' for u in users)

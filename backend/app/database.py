@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS providers (
  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL,
  model TEXT NOT NULL, api_key_encrypted TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
+ input_price_per_million REAL, output_price_per_million REAL, currency TEXT NOT NULL DEFAULT 'USD',
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS preferences (
@@ -101,6 +102,9 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
  provider TEXT, model TEXT, input_tokens INTEGER NOT NULL DEFAULT 0,
  output_tokens INTEGER NOT NULL DEFAULT 0, estimated_cost REAL NOT NULL DEFAULT 0,
  latency_ms INTEGER NOT NULL DEFAULT 0, metadata TEXT NOT NULL DEFAULT '{}',
+ usage_status TEXT NOT NULL DEFAULT 'unavailable', cost_status TEXT NOT NULL DEFAULT 'unknown',
+ total_tokens INTEGER, provider_request_id TEXT, finish_reason TEXT,
+ input_price_per_million REAL, output_price_per_million REAL, currency TEXT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  UNIQUE(tool_run_id),
  FOREIGN KEY(job_id) REFERENCES generation_jobs(id) ON DELETE CASCADE,
@@ -141,6 +145,14 @@ def workspace_db(user_id: int):
 def init_databases():
     with control_db() as db:
         db.executescript(CONTROL_SCHEMA)
+        provider_columns = {row['name'] for row in db.execute('PRAGMA table_info(providers)')}
+        for name, definition in {
+            'input_price_per_million': 'REAL',
+            'output_price_per_million': 'REAL',
+            'currency': "TEXT NOT NULL DEFAULT 'USD'",
+        }.items():
+            if name not in provider_columns:
+                db.execute(f'ALTER TABLE providers ADD COLUMN {name} {definition}')
     from .security import hash_password
     with control_db() as db:
         if not db.execute('SELECT 1 FROM users LIMIT 1').fetchone():
@@ -183,6 +195,19 @@ def workspace_for(user_id: int):
             db.execute("ALTER TABLE versions ADD COLUMN source_format TEXT NOT NULL DEFAULT 'single-file'")
             db.execute('''UPDATE versions SET source_format=(
                           SELECT projects.source_format FROM projects WHERE projects.id=versions.project_id)''')
+        usage_columns = {row['name'] for row in db.execute('PRAGMA table_info(usage_ledger)')}
+        for name, definition in {
+            'usage_status': "TEXT NOT NULL DEFAULT 'unavailable'",
+            'cost_status': "TEXT NOT NULL DEFAULT 'unknown'",
+            'total_tokens': 'INTEGER',
+            'provider_request_id': 'TEXT',
+            'finish_reason': 'TEXT',
+            'input_price_per_million': 'REAL',
+            'output_price_per_million': 'REAL',
+            'currency': 'TEXT',
+        }.items():
+            if name not in usage_columns:
+                db.execute(f'ALTER TABLE usage_ledger ADD COLUMN {name} {definition}')
 
 
 def rows(items):

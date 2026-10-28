@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-28
 
-**Current focus:** JOB-07B — model usage and honest cost estimates (next slice; not started)
+**Current focus:** JOB-07C — build/runtime provenance (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -98,11 +98,11 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 
 **Milestone gate:** `[ ]` Telemetry remains open; event delivery and cancellation are complete.
 
-**Deferred by design:** BASE-01, BASE-03, JOB-05, and JOB-06 are complete. JOB-07 still needs provider token/cost telemetry. It remains a deliberate follow-up before specialist workers, not a completed capability or a forgotten task.
+**Deferred by design:** BASE-01, BASE-03, JOB-05, and JOB-06 are complete. JOB-07C/D still need build/runtime provenance and owner-only usage inspection. They remain deliberate follow-ups before specialist workers, not completed capabilities or forgotten tasks.
 
 ## Next checkpoint — BASE/JOB pre-specialist readiness
 
-**Checkpoint status:** `[ ]` In progress — BASE-01, BASE-03, JOB-06, JOB-05A–C, and JOB-07A are complete; JOB-07B is the next review slice.
+**Checkpoint status:** `[ ]` In progress — BASE-01, BASE-03, JOB-06, JOB-05A–C, and JOB-07A/B are complete; JOB-07C is the next review slice.
 
 **Starting revision:** `a706e5a` (`Gate new releases with deterministic verification`).
 
@@ -164,7 +164,7 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 ### JOB-07 — Usage and provenance tracking
 
 - [x] **JOB-07A — Shared tool-run envelope.** `backend/app/jobs/tool_runs.py` provides immutable attempt-owned envelopes and terminal finalization for tool name/version, input hash, redacted output reference, status, retry sequence, start/end/duration, and spec/source provenance. Shared redaction removes credentials and URL queries. Provider HTTP requests, subprocess-based build/install and dependency checks, runtime launch/health, and verification checks persist distinct spans; schema fallback and output repair use an independent HTTP request sequence without changing repair limits. Detached legacy contexts remain uninstrumented, and existing verification report IDs and cancellation behavior are preserved.
-- [ ] **JOB-07B — Model usage and honest cost estimates.** Add an observed-completion adapter while retaining compatible generation wrappers. Capture provider, model, provider request ID, finish reason, schema fallback/repair reason, latency, and reported prompt/completion/total tokens per request. Missing usage is `unavailable`, never zero. Add optional configured input/output prices per million tokens and currency; snapshot prices with the usage row, label computed values as estimates, and report unpriced cost as unknown rather than `$0`. Forma Local must not fabricate token or cost data.
+- [x] **JOB-07B — Model usage and honest cost estimates.** `backend/app/jobs/usage.py` observes every provider HTTP response without changing the existing generation wrappers or repair budget. Usage rows link to their tool run and snapshot provider/model, request ID, finish reason, initial/fallback/output-repair reason, retry sequence, latency, and reported prompt/completion/total tokens. Availability is explicitly `reported`, `partial`, or `unavailable`; missing totals are not fabricated. Optional provider input/output prices per million tokens and currency are migrated and configurable in Administration, then snapshotted into each row. Computed costs are labelled estimates; missing tokens or prices remain `unknown`, while explicit zero usage and zero prices produce a legitimate estimated `$0`. Forma Local emits no synthetic model usage, and additive migrations preserve historical rows with explicit unknown defaults.
 - [ ] **JOB-07C — Build/runtime provenance.** Instrument dependency resolution/install, Vite builds, staging/promotion, runtime startup/health, and verification with durations, retries, cache hits, package/input hashes, source/spec hashes, environment/tool versions, and terminal status. Redact credentials, prompt bodies, access tokens, URL query strings, and private index credentials. Preserve existing verification reports and historical records.
 - [ ] **JOB-07D — Owner-only inspection and aggregation.** Add `GET /api/projects/{project_id}/usage` and a read-only Activity view for per-job and project totals, token availability, estimated/unknown cost, retries, tool durations, runtime health, and source/spec provenance. Test aggregation across attempts, cancelled-span closure, absent usage/pricing, legacy records, ownership checks, and secret scanning. Real-provider usage smoke remains opt-in.
 
@@ -260,3 +260,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-28 | JOB-05B live delivery and reconnect | Live tailing, cursor resume after disconnect, bounded backoff, immediate refresh, abort cleanup, and full regressions | 187 backend and 15 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-28 | JOB-05C polling fallback and fault coverage | Two repeatable quality evaluations, initial live replay, prompt persisted-event polling, cursor-expiry reconciliation, checkpoint-close recovery, deferred autopilot, and full regressions | 191 backend and 16 frontend unit tests passed; 2 event browser journeys passed; production build and Ruff clean |
 | 2026-10-28 | JOB-07A shared tool-run envelope | Provider fallback sequencing, process success/failure, detached cancellation, redaction, spec/source provenance, real verifier build and runtime launch/health, two quality evaluations, and full regressions | 194 backend and 16 frontend unit tests passed; production build and Ruff clean |
+| 2026-10-28 | JOB-07B model usage and honest costs | Reported/partial/missing tokens, unknown versus free costs, provider pricing API/migrations, schema fallback and output-repair observations, two quality evaluations, and full regressions | 200 backend and 16 frontend unit tests passed; production build and Ruff clean |

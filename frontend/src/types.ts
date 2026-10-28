@@ -1,5 +1,8 @@
 export type User = { id: number; email: string; name: string; role: 'admin' | 'user'; status?: string; created_at?: string; project_count?: number }
-export type Provider = { id: number; name: string; base_url: string; model: string; enabled: number; has_key: boolean; created_at: string }
+export type Provider = {
+  id: number; name: string; base_url: string; model: string; enabled: number; has_key: boolean; created_at: string
+  input_price_per_million: number | null; output_price_per_million: number | null; currency: string
+}
 export type Message = { id: number; role: 'user' | 'agent'; content: string; kind: string; metadata: string; created_at: string }
 export type Artifact = { id: number; path: string; stage: string; content: string; version: number; created_at: string }
 export type Version = { id: number; version: number; label: string; note: string; backend_mode: BackendMode; source_format: SourceFormat; created_at: string }

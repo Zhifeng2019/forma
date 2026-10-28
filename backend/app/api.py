@@ -157,9 +157,9 @@ def update_user(user_id: int, body: dict, admin=Depends(admin_user)):
 def providers(user=Depends(current_user)):
     with control_db() as db:
         if user['role'] == 'admin':
-            items = db.execute('SELECT id,name,base_url,model,enabled,created_at,api_key_encrypted FROM providers ORDER BY id')
+            items = db.execute('SELECT id,name,base_url,model,enabled,input_price_per_million,output_price_per_million,currency,created_at,api_key_encrypted FROM providers ORDER BY id')
         else:
-            items = db.execute('SELECT id,name,base_url,model,enabled,created_at,api_key_encrypted FROM providers WHERE enabled=1 ORDER BY id')
+            items = db.execute('SELECT id,name,base_url,model,enabled,input_price_per_million,output_price_per_million,currency,created_at,api_key_encrypted FROM providers WHERE enabled=1 ORDER BY id')
         result = []
         for item in items:
             row = dict(item)
@@ -173,8 +173,12 @@ def create_provider(body: ProviderInput, _admin=Depends(admin_user)):
     if not body.base_url.startswith(('https://', 'http://localhost', 'http://127.0.0.1')):
         raise HTTPException(400, 'Provider URL must use HTTPS')
     with control_db() as db:
-        cursor = db.execute('INSERT INTO providers(name,base_url,model,api_key_encrypted,enabled) VALUES(?,?,?,?,?)',
-                            (body.name, body.base_url.rstrip('/'), body.model, encrypt_secret(body.api_key), int(body.enabled)))
+        cursor = db.execute('''INSERT INTO providers(
+            name,base_url,model,api_key_encrypted,enabled,input_price_per_million,output_price_per_million,currency)
+            VALUES(?,?,?,?,?,?,?,?)''', (
+            body.name, body.base_url.rstrip('/'), body.model, encrypt_secret(body.api_key), int(body.enabled),
+            body.input_price_per_million, body.output_price_per_million, body.currency.upper(),
+        ))
         provider_id = cursor.lastrowid
     return {'id': provider_id, 'name': body.name}
 
@@ -186,8 +190,11 @@ def update_provider(provider_id: int, body: ProviderInput, _admin=Depends(admin_
         if not old:
             raise HTTPException(404, 'Provider not found')
         key = encrypt_secret(body.api_key) if body.api_key else old['api_key_encrypted']
-        db.execute('UPDATE providers SET name=?,base_url=?,model=?,api_key_encrypted=?,enabled=? WHERE id=?',
-                   (body.name, body.base_url.rstrip('/'), body.model, key, int(body.enabled), provider_id))
+        db.execute('''UPDATE providers SET name=?,base_url=?,model=?,api_key_encrypted=?,enabled=?,
+            input_price_per_million=?,output_price_per_million=?,currency=? WHERE id=?''', (
+            body.name, body.base_url.rstrip('/'), body.model, key, int(body.enabled),
+            body.input_price_per_million, body.output_price_per_million, body.currency.upper(), provider_id,
+        ))
     return {'ok': True}
 
 

@@ -19,6 +19,9 @@ class ProviderInput(BaseModel):
     model: str = Field(min_length=1, max_length=120)
     api_key: str = ''
     enabled: bool = True
+    input_price_per_million: float | None = Field(default=None, ge=0, le=1_000_000_000, allow_inf_nan=False)
+    output_price_per_million: float | None = Field(default=None, ge=0, le=1_000_000_000, allow_inf_nan=False)
+    currency: str = Field(default='USD', min_length=3, max_length=3, pattern='^[A-Za-z]{3}$')
 
 
 class PreferenceInput(BaseModel):
