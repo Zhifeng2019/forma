@@ -162,17 +162,39 @@ def main() -> None:
     parser.add_argument('--skip-browser', action='store_true', help='Skip Playwright while capturing backend and frontend units.')
     parser.add_argument('--skip-generation', action='store_true',
                         help='Write a suite-only 1.1 report without generation-quality evaluation.')
+    parser.add_argument('--generation-report', type=Path,
+                        help='Reuse a validated generation.json instead of rerunning quality evaluation.')
+    parser.add_argument('--check', action='store_true',
+                        help='Compare the output baseline with the accepted reference without running suites.')
+    parser.add_argument('--reference', type=Path,
+                        default=ROOT / 'backend' / 'tests' / 'evals' / 'baseline.json')
     parser.add_argument('--output', type=Path, default=ROOT / 'backend' / 'tests' / 'evals' / 'baseline.json')
     parser.add_argument('--schema-output', type=Path,
                         default=ROOT / 'backend' / 'tests' / 'evals' / 'baseline.schema.json')
     parser.add_argument('--write-schema', action='store_true', help='Write the current JSON Schema without running tests.')
     parser.add_argument('--timeout', type=int, default=900, help='Per-suite timeout in seconds.')
     args = parser.parse_args()
+    if args.skip_generation and args.generation_report:
+        parser.error('--skip-generation cannot be combined with --generation-report')
+    if args.check:
+        if args.write_schema:
+            parser.error('--check cannot be combined with --write-schema')
+        from app.evaluation.compare import compare_baseline_files
+        result = compare_baseline_files(args.reference, args.output)
+        print(json.dumps(result, indent=2))
+        if not result['passed']:
+            raise SystemExit(1)
+        return
     if args.write_schema:
         write_baseline_schema(args.schema_output)
         print(json.dumps({'output': str(args.schema_output), 'schema_version': '1.2'}, indent=2))
         return
-    result = capture(args.skip_browser, args.output, args.timeout, skip_generation=args.skip_generation)
+    quality = None
+    if args.generation_report:
+        from app.evaluation.compare import load_generation
+        quality = load_generation(args.generation_report)
+    result = capture(args.skip_browser, args.output, args.timeout,
+                     skip_generation=args.skip_generation, quality=quality)
     print(json.dumps({'output': str(args.output), 'suites': result['suites']}, indent=2))
 
 

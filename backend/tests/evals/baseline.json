@@ -1,33 +1,35 @@
 {
-  "schema_version": "1.0",
-  "captured_at": "2026-10-26T14:03:21.092892+00:00",
-  "source": "local-regression-suite",
+  "schema_version": "1.2",
+  "captured_at": "2026-10-28T00:59:10.430217Z",
+  "source": "partitioned-regression-suite",
   "suites": {
     "backend": {
       "status": "passed",
-      "passed": 31,
+      "passed": 169,
       "failed": 0,
-      "duration_ms": 167644
+      "duration_ms": 276560,
+      "reason": null
     },
     "frontend_unit": {
       "status": "passed",
-      "passed": 5,
+      "passed": 12,
       "failed": 0,
-      "duration_ms": 723
+      "duration_ms": 433,
+      "reason": null
     },
     "browser": {
       "status": "skipped",
-      "reason": "--skip-browser was supplied",
       "passed": 0,
       "failed": 0,
-      "duration_ms": 0
+      "duration_ms": 0,
+      "reason": "--skip-browser was supplied"
     },
     "provider_smoke": {
       "status": "skipped",
-      "reason": "real-provider evaluation is opt-in and is not part of baseline capture",
       "passed": 0,
       "failed": 0,
-      "duration_ms": 0
+      "duration_ms": 0,
+      "reason": "real-provider evaluation is opt-in and is not part of baseline capture"
     }
   },
   "compatibility": {
@@ -54,6 +56,253 @@
       "truncated-model-output",
       "invalid-json",
       "invalid-package-structure"
+    ]
+  },
+  "source_revision": "c7d6d153da32bdc00e64ba3d38fc7bd08cfafca1",
+  "dirty_tree": true,
+  "feature_flags": {
+    "durable_jobs_v1": true,
+    "appspec_v1": true,
+    "acceptance_gate_v1": true,
+    "specialist_workers_v1": true,
+    "sandbox_v1": true
+  },
+  "environment": {
+    "python_version": "3.13.7",
+    "node_version": "24.14.1",
+    "system": "Darwin",
+    "machine": "arm64"
+  },
+  "fixture_pack_version": "1.0",
+  "generation": {
+    "schema_version": "1.0",
+    "case_success": {
+      "numerator": 22,
+      "denominator": 22,
+      "rate": 1.0
+    },
+    "first_pass_proposal_validity": {
+      "numerator": 5,
+      "denominator": 9,
+      "rate": 0.5555555555555556
+    },
+    "repair_invocation": {
+      "numerator": 3,
+      "denominator": 9,
+      "rate": 0.3333333333333333
+    },
+    "repair_success": {
+      "numerator": 3,
+      "denominator": 3,
+      "rate": 1.0
+    },
+    "source_import_validity": {
+      "numerator": 12,
+      "denominator": 12,
+      "rate": 1.0
+    },
+    "production_build_success": {
+      "numerator": 2,
+      "denominator": 2,
+      "rate": 1.0
+    },
+    "runtime_health": {
+      "numerator": 2,
+      "denominator": 2,
+      "rate": 1.0
+    },
+    "verification_success": {
+      "numerator": 2,
+      "denominator": 2,
+      "rate": 1.0
+    },
+    "publish_gate_decisions": {
+      "numerator": 2,
+      "denominator": 2,
+      "rate": 1.0
+    },
+    "deterministic_hash_reuse": {
+      "numerator": 5,
+      "denominator": 5,
+      "rate": 1.0
+    },
+    "cases": [
+      {
+        "id": "provider:legacy-package",
+        "category": "provider",
+        "passed": true,
+        "expected": "valid-package:accept",
+        "actual": "passed",
+        "error": null
+      },
+      {
+        "id": "provider:truncated-model-output",
+        "category": "provider",
+        "passed": true,
+        "expected": "truncated-model-output:repair-once",
+        "actual": "repaired-2-calls",
+        "error": null
+      },
+      {
+        "id": "provider:invalid-json",
+        "category": "provider",
+        "passed": true,
+        "expected": "invalid-json:repair-once",
+        "actual": "repaired-2-calls",
+        "error": null
+      },
+      {
+        "id": "provider:invalid-package-structure",
+        "category": "provider",
+        "passed": true,
+        "expected": "invalid-package-structure:repair-once",
+        "actual": "repaired-2-calls",
+        "error": null
+      },
+      {
+        "id": "provider:missing-requirements",
+        "category": "provider",
+        "passed": true,
+        "expected": "missing-requirements:normalize",
+        "actual": "normalized",
+        "error": null
+      },
+      {
+        "id": "provider:empty-python-init",
+        "category": "provider",
+        "passed": true,
+        "expected": "empty-python-init:accept",
+        "actual": "accepted",
+        "error": null
+      },
+      {
+        "id": "provider:native-fetch-adapter",
+        "category": "provider",
+        "passed": true,
+        "expected": "native-fetch-adapter:accept",
+        "actual": "passed",
+        "error": null
+      },
+      {
+        "id": "provider:invalid-appspec-contract",
+        "category": "provider",
+        "passed": true,
+        "expected": "invalid-appspec-contract:reject",
+        "actual": "rejected",
+        "error": null
+      },
+      {
+        "id": "provider:partial-package-overlay",
+        "category": "provider",
+        "passed": true,
+        "expected": "partial-package-overlay:overlay",
+        "actual": "overlaid",
+        "error": null
+      },
+      {
+        "id": "hash:static-single",
+        "category": "determinism",
+        "passed": true,
+        "expected": "identical-hashes",
+        "actual": "identical",
+        "error": null
+      },
+      {
+        "id": "hash:fastapi-single",
+        "category": "determinism",
+        "passed": true,
+        "expected": "identical-hashes",
+        "actual": "identical",
+        "error": null
+      },
+      {
+        "id": "hash:static-multi",
+        "category": "determinism",
+        "passed": true,
+        "expected": "identical-hashes",
+        "actual": "identical",
+        "error": null
+      },
+      {
+        "id": "hash:fastapi-multi",
+        "category": "determinism",
+        "passed": true,
+        "expected": "identical-hashes",
+        "actual": "identical",
+        "error": null
+      },
+      {
+        "id": "hash:item-manager",
+        "category": "determinism",
+        "passed": true,
+        "expected": "identical-hashes",
+        "actual": "identical",
+        "error": null
+      },
+      {
+        "id": "build:static-multi",
+        "category": "build",
+        "passed": true,
+        "expected": "production-build",
+        "actual": "built",
+        "error": null
+      },
+      {
+        "id": "build:fastapi-multi",
+        "category": "build",
+        "passed": true,
+        "expected": "production-build",
+        "actual": "built",
+        "error": null
+      },
+      {
+        "id": "runtime:fastapi-single",
+        "category": "runtime",
+        "passed": true,
+        "expected": "runtime-health",
+        "actual": "healthy",
+        "error": null
+      },
+      {
+        "id": "runtime:fastapi-multi",
+        "category": "runtime",
+        "passed": true,
+        "expected": "runtime-health",
+        "actual": "healthy",
+        "error": null
+      },
+      {
+        "id": "verification:static-single",
+        "category": "verification",
+        "passed": true,
+        "expected": "full-verification",
+        "actual": "passed",
+        "error": null
+      },
+      {
+        "id": "verification:fastapi-multi",
+        "category": "verification",
+        "passed": true,
+        "expected": "full-verification",
+        "actual": "passed",
+        "error": null
+      },
+      {
+        "id": "gate:valid-release",
+        "category": "publish-gate",
+        "passed": true,
+        "expected": "publish-allowed",
+        "actual": "published",
+        "error": null
+      },
+      {
+        "id": "gate:invalid-release",
+        "category": "publish-gate",
+        "passed": true,
+        "expected": "reject-and-preserve",
+        "actual": "rejected-preserved",
+        "error": null
+      }
     ]
   }
 }

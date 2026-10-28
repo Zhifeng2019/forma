@@ -98,16 +98,27 @@ def test_capture_records_real_runner_results_and_compatibility():
     assert len(calls) == 6
 
 
-def test_current_baseline_file_remains_valid_legacy_document():
+def test_checked_in_baseline_matches_current_contract():
     path = Path(__file__).parent / 'evals' / 'baseline.json'
     if not path.exists():
         return
     baseline = parse_baseline(json.loads(path.read_text()))
-    assert isinstance(baseline, LegacyBaselineReport)
-    assert baseline.schema_version == '1.0'
-    assert {'backend', 'frontend_unit', 'browser', 'provider_smoke'} <= baseline.suites.model_dump().keys()
+    assert isinstance(baseline, BaselineReport)
+    assert baseline.schema_version == '1.2'
+    assert baseline.suites.backend.status == 'passed'
+    assert baseline.generation.case_success.numerator == 22
     assert baseline.captured_at.tzinfo is not None
     assert baseline.compatibility.source_formats == ['single-file', 'multi-file']
+
+
+def test_legacy_1_0_document_remains_readable():
+    current = json.loads((Path(__file__).parent / 'evals' / 'baseline.json').read_text())
+    legacy = {key: current[key] for key in ('captured_at', 'source', 'suites', 'compatibility')}
+    legacy['schema_version'] = '1.0'
+    baseline = parse_baseline(legacy)
+    assert isinstance(baseline, LegacyBaselineReport)
+    assert baseline.schema_version == '1.0'
+    assert baseline.suites.backend.status == 'passed'
 
 
 def test_checked_in_schema_matches_current_report_contract():

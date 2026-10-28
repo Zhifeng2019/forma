@@ -112,6 +112,14 @@ cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/eva
 
 This writes `backend/tests/evals/generation.json`. Its 22 cases cover provider acceptance and bounded repair, source/import validation, real Vite builds, FastAPI health, full verification, publish-gate decisions, and deterministic hashes. Metrics record numerators, denominators, and rates—not timing or external-provider availability. Temporary studios and generated runtimes are stopped after evaluation.
 
+Compare a candidate with the accepted baseline using:
+
+```bash
+cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/capture_baseline.py --check --output /path/to/candidate.json
+```
+
+The check derives directional thresholds and expected denominators from the accepted report, reports failures with specific case IDs, and ignores capture timestamps and suite durations. Use `--generation-report tests/evals/generation.json` to reuse validated quality evidence during a full capture instead of evaluating it again.
+
 After changing the report contract, regenerate its checked-in JSON Schema and run the schema-drift test:
 
 ```bash
