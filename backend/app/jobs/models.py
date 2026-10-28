@@ -18,7 +18,19 @@ class JobStatus(StrEnum):
     RECOVERY_REQUIRED = 'recovery_required'
 
 
+ACTIVE_JOB_STATUSES = (
+    JobStatus.QUEUED.value, JobStatus.LEASED.value, JobStatus.RUNNING.value,
+    JobStatus.WAITING_ON_TOOL.value, JobStatus.FINALIZING.value,
+    JobStatus.RETRY_SCHEDULED.value, JobStatus.WAITING_FOR_APPROVAL.value,
+    JobStatus.CANCEL_REQUESTED.value, JobStatus.CANCELLING.value,
+)
+
+
 class JobError(RuntimeError):
+    pass
+
+
+class JobCancelledError(JobError):
     pass
 
 

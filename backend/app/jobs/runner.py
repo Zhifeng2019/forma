@@ -8,6 +8,7 @@ import uuid
 from ..database import workspace_db
 from .cancellation import cancellation_event, clear_job, register_job
 from .checkpoints import checkpoint
+from .context import JobContext, activate_job_context, reset_job_context
 from .idempotency import canonical_input_hash
 from .leases import complete_attempt, finalize_job, heartbeat, lease_next_job
 from .models import JobStatus, LeaseLostError
@@ -87,12 +88,21 @@ async def _heartbeat_loop(user_id: int, attempt_id: int, lease_seconds: int, int
                 raise LeaseLostError('The generation lease expired or is no longer owned by this worker')
 
 
+def _mark_cancelling(user_id: int, job_id: str, attempt: dict) -> None:
+    with workspace_db(user_id) as db:
+        with job_transaction(db):
+            db.execute('UPDATE generation_jobs SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?',
+                       (JobStatus.CANCELLING.value, job_id, JobStatus.CANCEL_REQUESTED.value))
+            record_event(db, job_id, 'cancelling', {'attempt_id': attempt['attempt_id']},
+                         f'{attempt["attempt_id"]}:cancelling')
+
+
 def _cancel_attempt(user_id: int, project_id: str, job_id: str, attempt: dict, message: str) -> None:
     with workspace_db(user_id) as db:
         with job_transaction(db):
             complete_attempt(db, attempt['attempt_id'], JobStatus.CANCELLED.value, 'cancelled')
             checkpoint(db, job_id, attempt['attempt_id'], 'cancelled', {'reason': message})
-            record_event(db, job_id, 'cancelled', {'reason': message}, f'{attempt["attempt_id"]}:cancelled')
+            record_event(db, job_id, 'cancelled', {'reason': message}, f'{attempt["attempt_id"]}:cancelled:event')
             _project_error(db, project_id, message)
 
 
@@ -135,8 +145,13 @@ async def run_generation_job(
     job_id, attempt = prepared
     cancellation = register_job(job_id)
     with workspace_db(user_id) as db:
-        if get_job(db, job_id)['status'] == JobStatus.CANCEL_REQUESTED.value:
+        if get_job(db, job_id)['status'] in {JobStatus.CANCEL_REQUESTED.value, JobStatus.CANCELLING.value}:
             cancellation.set()
+    context = JobContext(
+        user_id=user_id, project_id=project_id, job_id=job_id,
+        attempt_id=attempt['attempt_id'], trace_id=attempt['trace_id'], cancellation=cancellation,
+    )
+    context_token = activate_job_context(context)
     operation = asyncio.create_task(operation_factory())
     cancellation_waiter = asyncio.create_task(cancellation.wait())
     heartbeat_task = asyncio.create_task(_heartbeat_loop(user_id, attempt['attempt_id'], lease_seconds, interval))
@@ -145,6 +160,7 @@ async def run_generation_job(
             {operation, cancellation_waiter, heartbeat_task}, return_when=asyncio.FIRST_COMPLETED,
         )
         if operation not in done and cancellation_waiter in done:
+            _mark_cancelling(user_id, job_id, attempt)
             operation.cancel()
             await asyncio.gather(operation, return_exceptions=True)
             _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation cancelled. Retry this stage.')
@@ -156,7 +172,13 @@ async def run_generation_job(
             with job_transaction(db):
                 job = get_job(db, job_id)
                 if job['status'] in {JobStatus.CANCEL_REQUESTED.value, JobStatus.CANCELLING.value}:
+                    db.execute('UPDATE generation_jobs SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?',
+                               (JobStatus.CANCELLING.value, job_id, JobStatus.CANCEL_REQUESTED.value))
+                    record_event(db, job_id, 'cancelling', {'attempt_id': attempt['attempt_id']},
+                                 f'{attempt["attempt_id"]}:cancelling')
                     complete_attempt(db, attempt['attempt_id'], JobStatus.CANCELLED.value, 'cancelled')
+                    record_event(db, job_id, 'cancelled', {'reason': 'Cancellation requested'},
+                                 f'{attempt["attempt_id"]}:cancelled:event')
                     checkpoint(db, job_id, attempt['attempt_id'], 'cancelled', {'reason': 'Cancellation requested'})
                     _project_error(db, project_id, 'Generation cancelled. Retry this stage.')
                     return True
@@ -189,3 +211,4 @@ async def run_generation_job(
         await asyncio.gather(cancellation_waiter, heartbeat_task, return_exceptions=True)
         if cancellation_event(job_id) is cancellation:
             clear_job(job_id)
+        reset_job_context(context_token)

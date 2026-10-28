@@ -99,9 +99,20 @@ def recover_expired_leases(db: sqlite3.Connection) -> int:
 
 
 def request_cancellation(db: sqlite3.Connection, job_id: str) -> bool:
+    inactive_statuses = {
+        *TERMINAL_STATUSES, JobStatus.CANCEL_REQUESTED.value, JobStatus.CANCELLING.value,
+    }
     with job_transaction(db):
-        cursor = db.execute('UPDATE generation_jobs SET status=?,updated_at=? WHERE id=? AND status NOT IN (?,?,?,?)',
-                            (JobStatus.CANCEL_REQUESTED.value, utc_now(), job_id, *TERMINAL_STATUSES))
-        requested = cursor.rowcount == 1
+        job = db.execute('SELECT status FROM generation_jobs WHERE id=?', (job_id,)).fetchone()
+        requested = False
+        if job and job['status'] not in inactive_statuses:
+            placeholders = ','.join('?' for _ in inactive_statuses)
+            cursor = db.execute(f'''UPDATE generation_jobs SET status=?,updated_at=?
+                WHERE id=? AND status NOT IN ({placeholders})''',
+                (JobStatus.CANCEL_REQUESTED.value, utc_now(), job_id, *inactive_statuses))
+            requested = cursor.rowcount == 1
+            if requested:
+                db.execute('''INSERT OR IGNORE INTO job_events(job_id,event_type,payload,dedupe_key)
+                    VALUES(?,?,?,?)''', (job_id, 'cancel_requested', '{}', 'cancel-requested'))
     cancel_job(job_id)
     return requested

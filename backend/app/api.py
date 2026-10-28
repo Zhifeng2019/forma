@@ -16,6 +16,8 @@ from .config import settings
 from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manager
 from .frontend_builder import PackageBuildError, deployment_archive, ensure_frontend_build, frontend_asset_path
 from .features import FeatureFlag, feature_enabled
+from .jobs.leases import request_cancellation
+from .jobs.service import active_job, get_job
 from .spec.review import appspec_review
 from .deployment_registry import delete_deployment, upsert_deployment
 
@@ -259,6 +261,7 @@ def project_payload(user_id, project_id):
         result.update(appspec_review(spec['content'] if spec else None))
         result['appspec_enabled'] = feature_enabled(FeatureFlag.APPSPEC_V1)
         result.update(verification_payload(user_id, project_id, result['current_version']))
+        result['active_job'] = active_job(db, project_id)
         result['published_url'] = f'/apps/{project_id}/' if result['published_version'] else None
         return result
 
@@ -337,6 +340,23 @@ async def verify_project(project_id: str, body: VerificationInput, user=Depends(
     except GenerationError as exc:
         raise HTTPException(409, str(exc)) from exc
     return project_payload(user['id'], project_id)
+
+
+@router.post('/projects/{project_id}/jobs/{job_id}/cancel')
+def cancel_project_job(project_id: str, job_id: str, user=Depends(current_user)):
+    owned_project(user['id'], project_id)
+    with workspace_db(user['id']) as db:
+        job = get_job(db, job_id)
+        if not job or job['project_id'] != project_id:
+            raise HTTPException(404, 'Generation job not found')
+        changed = request_cancellation(db, job_id)
+        current = get_job(db, job_id)
+    return {
+        'job_id': job_id,
+        'status': current['status'],
+        'current_attempt': current['current_attempt'],
+        'changed': changed,
+    }
 
 
 @router.delete('/projects/{project_id}')

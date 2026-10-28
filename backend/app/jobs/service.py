@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 
 from .idempotency import job_idempotency_key
-from .models import IdempotencyConflictError, JobStatus
+from .models import ACTIVE_JOB_STATUSES, IdempotencyConflictError, JobStatus
 from .transactions import job_transaction
 
 
@@ -37,6 +37,14 @@ def create_job(
 
 def get_job(db: sqlite3.Connection, job_id: str) -> dict | None:
     row = db.execute('SELECT * FROM generation_jobs WHERE id=?', (job_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def active_job(db: sqlite3.Connection, project_id: str) -> dict | None:
+    placeholders = ','.join('?' for _ in ACTIVE_JOB_STATUSES)
+    row = db.execute(f'''SELECT id,stage,status,current_attempt,trace_id,created_at,updated_at
+        FROM generation_jobs WHERE project_id=? AND status IN ({placeholders})
+        ORDER BY updated_at DESC,id DESC LIMIT 1''', (project_id, *ACTIVE_JOB_STATUSES)).fetchone()
     return dict(row) if row else None
 
 
