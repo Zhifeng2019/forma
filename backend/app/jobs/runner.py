@@ -80,6 +80,10 @@ def _prepare_attempt(
             checkpoint(db, job_id, attempt['attempt_id'], 'start', {
                 'stage': stage, 'action': action, 'trace_id': attempt['trace_id'],
             })
+            record_event(db, job_id, 'job.started', {
+                'stage': stage, 'action': action,
+                'attempt_id': attempt['attempt_id'], 'trace_id': attempt['trace_id'],
+            }, f'{attempt["attempt_id"]}:started')
         return job_id, attempt
 
 
@@ -89,6 +93,12 @@ async def _heartbeat_loop(user_id: int, attempt_id: int, lease_seconds: int, int
         with workspace_db(user_id) as db:
             if not heartbeat(db, attempt_id, lease_seconds):
                 raise LeaseLostError('The generation lease expired or is no longer owned by this worker')
+
+
+def _record_project_refresh(db: sqlite3.Connection, job_id: str, attempt: dict, status: str) -> None:
+    record_event(db, job_id, 'project.refresh', {
+        'status': status, 'attempt_id': attempt['attempt_id'],
+    }, f'{attempt["attempt_id"]}:project.refresh')
 
 
 def _mark_cancelling(user_id: int, job_id: str, attempt: dict) -> None:
@@ -106,6 +116,7 @@ def _cancel_attempt(user_id: int, project_id: str, job_id: str, attempt: dict, m
             complete_attempt(db, attempt['attempt_id'], JobStatus.CANCELLED.value, 'cancelled')
             checkpoint(db, job_id, attempt['attempt_id'], 'cancelled', {'reason': message})
             record_event(db, job_id, 'cancelled', {'reason': message}, f'{attempt["attempt_id"]}:cancelled:event')
+            _record_project_refresh(db, job_id, attempt, 'cancelled')
             _project_error(db, project_id, message)
 
 
@@ -117,6 +128,7 @@ def _fail_attempt(user_id: int, job_id: str, attempt: dict, exc: BaseException) 
             record_event(db, job_id, 'failed', {
                 'failure_type': type(exc).__name__, 'error': str(exc)[:2000],
             }, f'{attempt["attempt_id"]}:failed')
+            _record_project_refresh(db, job_id, attempt, 'failed')
 
 
 async def run_generation_job(
@@ -184,8 +196,13 @@ async def run_generation_job(
                         checkpoint(db, job_id, attempt['attempt_id'], 'failed', {'reason': 'Project generation failed'})
                         record_event(db, job_id, 'failed', {'reason': 'Project generation failed'},
                                      f'{attempt["attempt_id"]}:failed')
+                        _record_project_refresh(db, job_id, attempt, 'failed')
                         return True
                     finalize_job(db, attempt, input_hash)
+                    record_event(db, job_id, 'job.succeeded', {
+                        'stage': stage, 'action': action, 'attempt_id': attempt['attempt_id'],
+                    }, f'{attempt["attempt_id"]}:succeeded')
+                    _record_project_refresh(db, job_id, attempt, 'succeeded')
                     checkpoint(db, job_id, attempt['attempt_id'], 'end', {
                         'stage': stage, 'action': action, 'trace_id': attempt['trace_id'],
                     })

@@ -50,7 +50,8 @@ def test_successful_job_persists_attempt_and_checkpoints():
         assert len(job['trace_id']) == 32
         attempt = db.execute('SELECT * FROM job_attempts WHERE job_id=?', (job['id'],)).fetchone()
         assert attempt['attempt_number'] == 1 and attempt['ended_at'] is not None
-        events = db.execute('SELECT payload FROM job_events WHERE job_id=? ORDER BY id', (job['id'],)).fetchall()
+        events = db.execute("SELECT payload FROM job_events WHERE job_id=? AND event_type='checkpoint' ORDER BY id",
+                            (job['id'],)).fetchall()
         assert [json.loads(row['payload'])['name'] for row in events] == ['start', 'end']
 
 

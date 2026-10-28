@@ -1,8 +1,8 @@
 import asyncio
 import json
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 import httpx
 from .database import control_db, workspace_db, rows
 from .deps import current_user, admin_user, owned_project
@@ -16,6 +16,7 @@ from .config import settings
 from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manager
 from .frontend_builder import PackageBuildError, deployment_archive, ensure_frontend_build, frontend_asset_path
 from .features import FeatureFlag, feature_enabled
+from .jobs.events import high_watermark, replay_events, replay_frames
 from .jobs.leases import request_cancellation
 from .jobs.models import JobCancelledError
 from .jobs.service import active_job, get_job
@@ -307,6 +308,35 @@ async def create_project(body: ProjectInput, user=Depends(current_user)):
 @router.get('/projects/{project_id}')
 def get_project(project_id: str, user=Depends(current_user)):
     return project_payload(user['id'], project_id)
+
+
+@router.get('/projects/{project_id}/events')
+def project_events(
+    project_id: str, request: Request, after: int | None = None,
+    limit: int = Query(200, ge=1, le=500), user=Depends(current_user),
+):
+    owned_project(user['id'], project_id)
+    raw_cursor = request.headers.get('last-event-id')
+    try:
+        cursor = int(raw_cursor) if raw_cursor is not None else (after or 0)
+    except ValueError as exc:
+        raise HTTPException(422, 'Event cursor must be a non-negative integer') from exc
+    if cursor < 0:
+        raise HTTPException(422, 'Event cursor must be a non-negative integer')
+    with workspace_db(user['id']) as db:
+        high = high_watermark(db, project_id)
+        if cursor > high:
+            raise HTTPException(409, {'error': 'cursor_expired', 'high_watermark': high})
+        events = replay_events(db, project_id, cursor, limit)
+    cursor = events[-1]['id'] if events else cursor
+    return StreamingResponse(
+        replay_frames(events, project_id, cursor),
+        media_type='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive', 'X-Event-Cursor': str(cursor),
+        },
+    )
 
 
 @router.get('/projects/{project_id}/verification')
