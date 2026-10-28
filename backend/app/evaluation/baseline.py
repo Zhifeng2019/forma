@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .quality import GenerationQuality
+
 
 class ReportModel(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -81,8 +83,8 @@ class LegacyBaselineReport(BaselineDocument):
     schema_version: Literal['1.0']
 
 
-class BaselineReport(BaselineDocument):
-    """Current capture contract with explicit reproducibility provenance."""
+class BaselineReportV1_1(BaselineDocument):
+    """Suite-only capture contract with reproducibility provenance."""
 
     schema_version: Literal['1.1']
     source_revision: str = Field(pattern=r'^[0-9a-f]{40}$')
@@ -92,12 +94,21 @@ class BaselineReport(BaselineDocument):
     fixture_pack_version: str = Field(min_length=1)
 
 
-def parse_baseline(document: dict) -> BaselineReport | LegacyBaselineReport:
+class BaselineReport(BaselineReportV1_1):
+    """Current capture contract with deterministic generation-quality evidence."""
+
+    schema_version: Literal['1.2']
+    generation: GenerationQuality
+
+
+def parse_baseline(document: dict) -> BaselineReport | BaselineReportV1_1 | LegacyBaselineReport:
     if not isinstance(document, dict):
         raise ValueError('A baseline report must be a JSON object')
     version = document.get('schema_version')
     if version == '1.0':
         return LegacyBaselineReport.model_validate(document)
     if version == '1.1':
+        return BaselineReportV1_1.model_validate(document)
+    if version == '1.2':
         return BaselineReport.model_validate(document)
     raise ValueError(f'Unsupported baseline schema version: {version!r}')

@@ -1,6 +1,7 @@
 """Capture a reproducible v1.4 baseline without contacting an LLM provider."""
 
 import argparse
+import asyncio
 from datetime import datetime, timezone
 import json
 import os
@@ -16,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / 'backend') not in sys.path:
     sys.path.insert(0, str(ROOT / 'backend'))
 
-from app.evaluation.baseline import BaselineReport  # noqa: E402
+from app.evaluation.baseline import BaselineReport, BaselineReportV1_1  # noqa: E402
 from app.features import FeatureFlag, feature_enabled  # noqa: E402
 
 FIXTURE_PACK_VERSION = '1.0'
@@ -103,16 +104,20 @@ def write_baseline(
     suites: dict[str, dict],
     source: str = 'local-regression-suite',
     metadata: dict | None = None,
+    generation=None,
 ) -> dict:
     context = capture_metadata() if metadata is None else metadata
-    report = BaselineReport(
-        schema_version='1.1',
-        captured_at=datetime.now(timezone.utc),
-        source=source,
-        suites=suites,
-        compatibility=COMPATIBILITY,
+    values = {
+        'captured_at': datetime.now(timezone.utc),
+        'source': source,
+        'suites': suites,
+        'compatibility': COMPATIBILITY,
         **context,
-    )
+    }
+    if generation is None:
+        report = BaselineReportV1_1(schema_version='1.1', **values)
+    else:
+        report = BaselineReport(schema_version='1.2', generation=generation, **values)
     document = {
         'schema_version': report.schema_version,
         **report.model_dump(mode='json', exclude={'schema_version'}),
@@ -128,7 +133,11 @@ def capture(
     timeout: int,
     runner=subprocess.run,
     metadata: dict | None = None,
+    skip_generation: bool = False,
+    quality=None,
 ) -> dict:
+    if skip_generation and quality is not None:
+        raise BaselineError('skip_generation cannot be combined with an injected quality report')
     python = sys.executable
     npm, npx = shutil.which('npm'), shutil.which('npx')
     if not npm or not npx:
@@ -142,12 +151,17 @@ def capture(
         ),
         'provider_smoke': skipped('real-provider evaluation is opt-in and is not part of baseline capture'),
     }
-    return write_baseline(output, suites, metadata=metadata)
+    if quality is None and not skip_generation:
+        from scripts.evaluate_generation import evaluate_generation_quality
+        quality = asyncio.run(evaluate_generation_quality())
+    return write_baseline(output, suites, metadata=metadata, generation=quality)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--skip-browser', action='store_true', help='Skip Playwright while capturing backend and frontend units.')
+    parser.add_argument('--skip-generation', action='store_true',
+                        help='Write a suite-only 1.1 report without generation-quality evaluation.')
     parser.add_argument('--output', type=Path, default=ROOT / 'backend' / 'tests' / 'evals' / 'baseline.json')
     parser.add_argument('--schema-output', type=Path,
                         default=ROOT / 'backend' / 'tests' / 'evals' / 'baseline.schema.json')
@@ -156,9 +170,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.write_schema:
         write_baseline_schema(args.schema_output)
-        print(json.dumps({'output': str(args.schema_output), 'schema_version': '1.1'}, indent=2))
+        print(json.dumps({'output': str(args.schema_output), 'schema_version': '1.2'}, indent=2))
         return
-    result = capture(args.skip_browser, args.output, args.timeout)
+    result = capture(args.skip_browser, args.output, args.timeout, skip_generation=args.skip_generation)
     print(json.dumps({'output': str(args.output), 'suites': result['suites']}, indent=2))
 
 

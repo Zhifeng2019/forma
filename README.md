@@ -102,7 +102,15 @@ Regenerate the evaluation baseline with:
 cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/capture_baseline.py
 ```
 
-Use `--skip-browser` for a backend/frontend-only capture. Baseline output is written to `backend/tests/evals/baseline.json`. New captures use schema 1.1 and record source revision, dirty-tree state, feature flags, Python/Node/platform versions, and fixture-pack provenance without storing credentials or workspace paths. Existing 1.0 reports remain readable without inventing missing metadata.
+Use `--skip-browser` for a backend/frontend-only capture and `--skip-generation` for a suite-only 1.1 report. Baseline output is written to `backend/tests/evals/baseline.json`. Full captures use schema 1.2 and add deterministic generation-quality metrics to the revision, dirty-tree, feature-flag, runtime-version, and fixture-pack provenance. Existing 1.0 and 1.1 reports remain readable without inventing missing metadata.
+
+Run the fixture-driven quality evaluation independently with:
+
+```bash
+cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/evaluate_generation.py
+```
+
+This writes `backend/tests/evals/generation.json`. Its 22 cases cover provider acceptance and bounded repair, source/import validation, real Vite builds, FastAPI health, full verification, publish-gate decisions, and deterministic hashes. Metrics record numerators, denominators, and rates—not timing or external-provider availability. Temporary studios and generated runtimes are stopped after evaluation.
 
 After changing the report contract, regenerate its checked-in JSON Schema and run the schema-drift test:
 

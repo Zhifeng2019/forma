@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.evaluation.baseline import BaselineReport, LegacyBaselineReport, SuiteResult, parse_baseline
+from app.evaluation.baseline import BaselineReport, BaselineReportV1_1, LegacyBaselineReport, SuiteResult, parse_baseline
+from app.evaluation.quality import GenerationQuality, QualityCase, QualityMetric
 from app.features import FeatureFlag
 from scripts.capture_baseline import (
     FIXTURE_PACK_VERSION, BaselineError, capture, capture_metadata, parse_metrics,
@@ -25,6 +26,23 @@ def capture_context():
         },
         'fixture_pack_version': FIXTURE_PACK_VERSION,
     }
+
+
+def quality_document():
+    metric = QualityMetric.from_counts(1, 1)
+    return GenerationQuality(
+        case_success=metric,
+        first_pass_proposal_validity=metric,
+        repair_invocation=metric,
+        repair_success=metric,
+        source_import_validity=metric,
+        production_build_success=metric,
+        runtime_health=metric,
+        verification_success=metric,
+        publish_gate_decisions=metric,
+        deterministic_hash_reuse=metric,
+        cases=[QualityCase(id='unit-case', category='unit', passed=True, expected='pass', actual='pass')],
+    )
 
 
 def test_parse_metrics_handles_pass_and_failure_summaries():
@@ -53,7 +71,7 @@ def test_capture_records_real_runner_results_and_compatibility():
             name = 'frontend_unit'
         return SimpleNamespace(returncode=0, stdout=summaries[name], stderr='')
 
-    result = capture(False, output, timeout=1, runner=fake_runner, metadata=capture_context())
+    result = capture(False, output, timeout=1, runner=fake_runner, metadata=capture_context(), skip_generation=True)
     assert result['suites']['backend']['passed'] == 17
     assert result['suites']['frontend_unit']['passed'] == 5
     assert result['suites']['browser']['passed'] == 5
@@ -65,8 +83,19 @@ def test_capture_records_real_runner_results_and_compatibility():
     assert saved['fixture_pack_version'] == FIXTURE_PACK_VERSION
     assert set(saved['feature_flags']) == {flag.value for flag in FeatureFlag}
     assert saved['compatibility']['source_formats'] == ['single-file', 'multi-file']
-    assert isinstance(parse_baseline(saved), BaselineReport)
+    assert isinstance(parse_baseline(saved), BaselineReportV1_1)
     assert len(calls) == 3
+
+    quality_output = Path(os.environ['DATA_DIR']) / 'baseline-quality-test.json'
+    result = capture(False, quality_output, timeout=1, runner=fake_runner,
+                     metadata=capture_context(), quality=quality_document())
+    saved = json.loads(quality_output.read_text())
+    assert saved['schema_version'] == '1.2'
+    assert saved['generation']['case_success'] == {'numerator': 1, 'denominator': 1, 'rate': 1.0}
+    assert saved['generation']['cases'][0]['id'] == 'unit-case'
+    assert isinstance(parse_baseline(saved), BaselineReport)
+    assert result['generation']['case_success']['numerator'] == 1
+    assert len(calls) == 6
 
 
 def test_current_baseline_file_remains_valid_legacy_document():

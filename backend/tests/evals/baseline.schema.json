@@ -132,6 +132,154 @@
       "title": "FeatureFlags",
       "type": "object"
     },
+    "GenerationQuality": {
+      "additionalProperties": false,
+      "properties": {
+        "case_success": {
+          "$ref": "#/$defs/QualityMetric"
+        },
+        "cases": {
+          "items": {
+            "$ref": "#/$defs/QualityCase"
+          },
+          "title": "Cases",
+          "type": "array"
+        },
+        "deterministic_hash_reuse": {
+          "$ref": "#/$defs/QualityMetric"
+        },
+        "first_pass_proposal_validity": {
+          "$ref": "#/$defs/QualityMetric"
+        },
+        "production_build_success": {
+          "$ref": "#/$defs/QualityMetric"
+        },
+        "publish_gate_decisions": {
+          "$ref": "#/$defs/QualityMetric"
+        },
+        "repair_invocation": {
+          "$ref": "#/$defs/QualityMetric"
+        },
+        "repair_success": {
+          "$ref": "#/$defs/QualityMetric"
+        },
+        "runtime_health": {
+          "$ref": "#/$defs/QualityMetric"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "pattern": "^1\\.0$",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_import_validity": {
+          "$ref": "#/$defs/QualityMetric"
+        },
+        "verification_success": {
+          "$ref": "#/$defs/QualityMetric"
+        }
+      },
+      "required": [
+        "case_success",
+        "first_pass_proposal_validity",
+        "repair_invocation",
+        "repair_success",
+        "source_import_validity",
+        "production_build_success",
+        "runtime_health",
+        "verification_success",
+        "publish_gate_decisions",
+        "deterministic_hash_reuse",
+        "cases"
+      ],
+      "title": "GenerationQuality",
+      "type": "object"
+    },
+    "QualityCase": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "minLength": 1,
+          "title": "Actual",
+          "type": "string"
+        },
+        "category": {
+          "minLength": 1,
+          "title": "Category",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "expected": {
+          "minLength": 1,
+          "title": "Expected",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "passed",
+        "expected",
+        "actual"
+      ],
+      "title": "QualityCase",
+      "type": "object"
+    },
+    "QualityMetric": {
+      "additionalProperties": false,
+      "properties": {
+        "denominator": {
+          "minimum": 0,
+          "title": "Denominator",
+          "type": "integer"
+        },
+        "numerator": {
+          "minimum": 0,
+          "title": "Numerator",
+          "type": "integer"
+        },
+        "rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rate"
+        }
+      },
+      "required": [
+        "numerator",
+        "denominator"
+      ],
+      "title": "QualityMetric",
+      "type": "object"
+    },
     "SuiteResult": {
       "additionalProperties": false,
       "properties": {
@@ -208,7 +356,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Current capture contract with explicit reproducibility provenance.",
+  "description": "Current capture contract with deterministic generation-quality evidence.",
   "properties": {
     "captured_at": {
       "format": "date-time",
@@ -233,8 +381,11 @@
       "title": "Fixture Pack Version",
       "type": "string"
     },
+    "generation": {
+      "$ref": "#/$defs/GenerationQuality"
+    },
     "schema_version": {
-      "const": "1.1",
+      "const": "1.2",
       "title": "Schema Version",
       "type": "string"
     },
@@ -262,7 +413,8 @@
     "dirty_tree",
     "feature_flags",
     "environment",
-    "fixture_pack_version"
+    "fixture_pack_version",
+    "generation"
   ],
   "title": "BaselineReport",
   "type": "object"
