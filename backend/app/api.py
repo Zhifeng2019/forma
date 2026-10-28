@@ -17,6 +17,7 @@ from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manag
 from .frontend_builder import PackageBuildError, deployment_archive, ensure_frontend_build, frontend_asset_path
 from .features import FeatureFlag, feature_enabled
 from .jobs.leases import request_cancellation
+from .jobs.models import JobCancelledError
 from .jobs.service import active_job, get_job
 from .spec.review import appspec_review
 from .deployment_registry import delete_deployment, upsert_deployment
@@ -576,6 +577,8 @@ async def publish_project(project_id: str, body: PublishInput, user=Depends(curr
     if feature_enabled(FeatureFlag.ACCEPTANCE_GATE_V1) and project['published_version'] != version:
         try:
             report = await verify_package(user['id'], project_id, version, force=True)
+        except JobCancelledError as exc:
+            raise HTTPException(409, 'Verification was cancelled. The existing release is unchanged.') from exc
         except GenerationError as exc:
             raise HTTPException(409, f'Verification could not be completed: {exc}') from exc
         if not report['can_publish']:

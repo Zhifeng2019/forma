@@ -11,8 +11,11 @@ from .checkpoints import checkpoint
 from .context import JobContext, activate_job_context, reset_job_context
 from .idempotency import canonical_input_hash
 from .leases import complete_attempt, finalize_job, heartbeat, lease_next_job
-from .models import JobStatus, LeaseLostError
+from .models import JobCancelledError, JobStatus, LeaseLostError
 from .service import create_job, get_job, record_event
+from .snapshots import (
+    capture_attempt_snapshot, discard_attempt_snapshot, rollback_attempt_snapshot,
+)
 from .transactions import job_transaction
 
 _ACTIVE_STATUSES = {
@@ -147,6 +150,7 @@ async def run_generation_job(
     with workspace_db(user_id) as db:
         if get_job(db, job_id)['status'] in {JobStatus.CANCEL_REQUESTED.value, JobStatus.CANCELLING.value}:
             cancellation.set()
+    snapshot = capture_attempt_snapshot(user_id, project_id, job_id, attempt['attempt_id'], action, input_data)
     context = JobContext(
         user_id=user_id, project_id=project_id, job_id=job_id,
         attempt_id=attempt['attempt_id'], trace_id=attempt['trace_id'], cancellation=cancellation,
@@ -163,6 +167,7 @@ async def run_generation_job(
             _mark_cancelling(user_id, job_id, attempt)
             operation.cancel()
             await asyncio.gather(operation, return_exceptions=True)
+            rollback_attempt_snapshot(snapshot)
             _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation cancelled. Retry this stage.')
             return True
         if operation not in done and heartbeat_task in done:
@@ -171,32 +176,34 @@ async def run_generation_job(
         with workspace_db(user_id) as db:
             with job_transaction(db):
                 job = get_job(db, job_id)
-                if job['status'] in {JobStatus.CANCEL_REQUESTED.value, JobStatus.CANCELLING.value}:
-                    db.execute('UPDATE generation_jobs SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?',
-                               (JobStatus.CANCELLING.value, job_id, JobStatus.CANCEL_REQUESTED.value))
-                    record_event(db, job_id, 'cancelling', {'attempt_id': attempt['attempt_id']},
-                                 f'{attempt["attempt_id"]}:cancelling')
-                    complete_attempt(db, attempt['attempt_id'], JobStatus.CANCELLED.value, 'cancelled')
-                    record_event(db, job_id, 'cancelled', {'reason': 'Cancellation requested'},
-                                 f'{attempt["attempt_id"]}:cancelled:event')
-                    checkpoint(db, job_id, attempt['attempt_id'], 'cancelled', {'reason': 'Cancellation requested'})
-                    _project_error(db, project_id, 'Generation cancelled. Retry this stage.')
-                    return True
-                project = db.execute('SELECT status FROM projects WHERE id=?', (project_id,)).fetchone()
-                if project is None or project['status'] == 'error':
-                    complete_attempt(db, attempt['attempt_id'], JobStatus.FAILED.value, 'generation_failed')
-                    checkpoint(db, job_id, attempt['attempt_id'], 'failed', {'reason': 'Project generation failed'})
-                    record_event(db, job_id, 'failed', {'reason': 'Project generation failed'},
-                                 f'{attempt["attempt_id"]}:failed')
-                    return True
-                finalize_job(db, attempt, input_hash)
-                checkpoint(db, job_id, attempt['attempt_id'], 'end', {
-                    'stage': stage, 'action': action, 'trace_id': attempt['trace_id'],
-                })
+                cancelled = job['status'] in {JobStatus.CANCEL_REQUESTED.value, JobStatus.CANCELLING.value}
+                if not cancelled:
+                    project = db.execute('SELECT status FROM projects WHERE id=?', (project_id,)).fetchone()
+                    if project is None or project['status'] == 'error':
+                        complete_attempt(db, attempt['attempt_id'], JobStatus.FAILED.value, 'generation_failed')
+                        checkpoint(db, job_id, attempt['attempt_id'], 'failed', {'reason': 'Project generation failed'})
+                        record_event(db, job_id, 'failed', {'reason': 'Project generation failed'},
+                                     f'{attempt["attempt_id"]}:failed')
+                        return True
+                    finalize_job(db, attempt, input_hash)
+                    checkpoint(db, job_id, attempt['attempt_id'], 'end', {
+                        'stage': stage, 'action': action, 'trace_id': attempt['trace_id'],
+                    })
+        if cancelled:
+            _mark_cancelling(user_id, job_id, attempt)
+            rollback_attempt_snapshot(snapshot)
+            _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation cancelled. Retry this stage.')
+            return True
+        return True
+    except JobCancelledError:
+        _mark_cancelling(user_id, job_id, attempt)
+        rollback_attempt_snapshot(snapshot)
+        _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation cancelled. Retry this stage.')
         return True
     except asyncio.CancelledError:
         operation.cancel()
         await asyncio.gather(operation, return_exceptions=True)
+        rollback_attempt_snapshot(snapshot)
         _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation stopped. Retry this stage.')
         raise
     except Exception as exc:
@@ -211,4 +218,5 @@ async def run_generation_job(
         await asyncio.gather(cancellation_waiter, heartbeat_task, return_exceptions=True)
         if cancellation_event(job_id) is cancellation:
             clear_job(job_id)
+        discard_attempt_snapshot(snapshot)
         reset_job_context(context_token)

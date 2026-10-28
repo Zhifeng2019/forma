@@ -16,6 +16,7 @@ from ..frontend_builder import (
     _node_binaries, deployment_archive, ensure_frontend_build, safe_path, version_directory, write_source_files,
 )
 from ..jobs.idempotency import canonical_input_hash, job_idempotency_key
+from ..jobs.models import JobCancelledError
 from ..jobs.processes import run_process
 from ..jobs.runner import run_generation_job
 from ..jobs.service import record_event
@@ -376,11 +377,13 @@ async def verify_package(
         user_id, project_id, 'verify', 'verify-package', input_data, operation,
         retry_succeeded=force,
     )
+    with workspace_db(user_id) as db:
+        job = db.execute('SELECT id,status FROM generation_jobs WHERE project_id=? AND idempotency_key=?',
+                         (project_id, job_key)).fetchone()
+    if job and job['status'] == 'cancelled':
+        raise JobCancelledError('Verification was cancelled. Retry when you are ready.')
     if outcome:
         return outcome['report']
-    with workspace_db(user_id) as db:
-        job = db.execute('SELECT id FROM generation_jobs WHERE project_id=? AND idempotency_key=?',
-                         (project_id, job_key)).fetchone()
     latest = latest_verification_report(user_id, job['id']) if job else None
     if latest:
         return latest

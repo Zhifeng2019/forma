@@ -78,11 +78,17 @@ def finalize_job(db: sqlite3.Connection, attempt: dict, expected_input_hash: str
     if attempt['input_hash'] != expected_input_hash:
         raise StaleJobError('Job input changed before finalization')
     with job_transaction(db):
-        current = db.execute('''SELECT generation_jobs.input_hash FROM generation_jobs
-            JOIN job_attempts ON job_attempts.job_id=generation_jobs.id
+        current = db.execute('''SELECT generation_jobs.input_hash,generation_jobs.status,job_attempts.worker_id
+            FROM generation_jobs JOIN job_attempts ON job_attempts.job_id=generation_jobs.id
             WHERE job_attempts.id=? AND job_attempts.ended_at IS NULL''', (attempt['attempt_id'],)).fetchone()
         if not current or current['input_hash'] != expected_input_hash:
             raise StaleJobError('Job input changed before finalization')
+        if current['worker_id'] != attempt['worker_id']:
+            raise StaleJobError('The worker no longer owns this attempt')
+        if current['status'] in {JobStatus.CANCEL_REQUESTED.value, JobStatus.CANCELLING.value, JobStatus.CANCELLED.value}:
+            raise StaleJobError('Job was cancelled before finalization')
+        if current['status'] not in {JobStatus.LEASED.value, JobStatus.RUNNING.value, JobStatus.WAITING_ON_TOOL.value, JobStatus.FINALIZING.value}:
+            raise StaleJobError('Job is not active for finalization')
         complete_attempt(db, attempt['attempt_id'], JobStatus.SUCCEEDED.value)
 
 

@@ -44,12 +44,16 @@ export type VerificationReport = {
   }
   started_at: string; ended_at: string; duration_ms: number; checks: VerificationCheck[]
 }
+export type ActiveJob = {
+  id: string; stage: string; status: string; current_attempt: number
+  trace_id: string; created_at: string; updated_at: string
+}
 export type Project = {
   id: string; name: string; brief: string; description: string; stage: string; stage_index: number
   phase_index: number; status: 'ready' | 'working' | 'error'; auto_mode: boolean; current_version: number
   backend_mode: BackendMode; backend_reason: string; backend_enabled: boolean; source_format: SourceFormat
   published_version: number | null; published_url?: string; created_at: string; updated_at: string
-  messages: Message[]; artifacts: Artifact[]; versions: Version[]; events: StudioEvent[]
+  messages: Message[]; artifacts: Artifact[]; versions: Version[]; events: StudioEvent[]; active_job?: ActiveJob | null
   appspec_enabled?: boolean; appspec?: AppSpecEnvelope | null
   appspec_valid?: boolean | null; appspec_error?: string | null
   verification?: VerificationReport | null; verification_running?: boolean

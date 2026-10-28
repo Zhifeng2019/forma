@@ -11,6 +11,7 @@ import { BackendPanel } from '../components/BackendPanel'
 import { SourcePanel } from '../components/SourcePanel'
 import { contractApprovalError, SpecReview } from '../components/SpecReview'
 import { VerificationPanel } from '../components/VerificationPanel'
+import { CancelJobButton } from '../components/CancelJobButton'
 
 const stages = [
   { id: 'discovery', short: 'Describe', title: 'Product description', action: 'Approve description' },
@@ -28,6 +29,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   const [project, setProject] = useState<Project | null>(null)
   const [tab, setTab] = useState<Tab>('preview')
   const [busy, setBusy] = useState(false)
+  const [cancelPending, setCancelPending] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop')
@@ -53,7 +55,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   useEffect(() => {
     if (!project) return
     const autopilotInProgress = project.auto_mode && project.status !== 'error' && ['discovery', 'design', 'plan', 'build'].includes(project.stage)
-    if (project.status !== 'working' && !autopilotInProgress && !project.verification_running) return
+    if (!busy && project.status !== 'working' && !autopilotInProgress && !project.verification_running) return
     let active = true, refreshing = false, failures = 0, version = project.current_version
     const refresh = async () => {
       if (refreshing) return
@@ -80,7 +82,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
     void refresh()
     const timer = window.setInterval(() => { void refresh() }, 1500)
     return () => { active = false; window.clearInterval(timer) }
-  }, [id, project?.status, project?.stage, project?.auto_mode, project?.verification_running])
+  }, [id, busy, project?.status, project?.stage, project?.auto_mode, project?.verification_running])
   useEffect(() => {
     if (project?.stage === 'build' && project.current_version === 0 && project.appspec_enabled && project.appspec) setTab('contract')
   }, [project?.stage, project?.current_version, project?.appspec_enabled, project?.appspec])
@@ -100,7 +102,8 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   const document = project.artifacts.find(a => a.path === docPath)
   const isWorking = busy || project.status === 'working' || project.verification_running
   const contractError = contractApprovalError(project)
-  const currentWorkingLabel = project.verification_running ? 'Verifying your application…' : migrationTarget ? `Migrating to ${migrationTarget === 'fastapi' ? 'FastAPI' : 'frontend only'}…` : workingLabel(project.stage)
+  const isCancelling = cancelPending || ['cancel_requested', 'cancelling'].includes(project.active_job?.status || '')
+  const currentWorkingLabel = isCancelling ? 'Cancelling…' : project.verification_running ? 'Verifying your application…' : migrationTarget ? `Migrating to ${migrationTarget === 'fastapi' ? 'FastAPI' : 'frontend only'}…` : workingLabel(project.stage)
   const publishUrl = `${window.location.origin}/apps/${project.id}/`
 
   const advance = async () => {
@@ -124,6 +127,18 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
       })
       setProject(next); setTab('verification')
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) }
+  }
+  const cancelActiveJob = async () => {
+    const job = project.active_job
+    if (!job || isCancelling) return
+    setCancelPending(true); setError('')
+    try {
+      await api(`/projects/${id}/jobs/${job.id}/cancel`, { method: 'POST' })
+      setProject(current => current ? {
+        ...current,
+        active_job: current.active_job ? { ...current.active_job, status: 'cancelling' } : null,
+      } : current)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setCancelPending(false) }
   }
   const send = async (event: FormEvent) => {
     event.preventDefault(); if (!message.trim() || isWorking) return
@@ -191,7 +206,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
           {tab === 'server' && project.backend_mode === 'fastapi' && <BackendPanel project={project} onChanged={() => void load()} />}
           {tab === 'activity' && <div className="activity-view"><div className="activity-heading"><span className="eyebrow">PROJECT TIMELINE</span><h2>Every step, in the open.</h2><p>A clear record of your product team’s work and releases.</p></div><div className="timeline">{project.events.map(event => <div key={event.id}><span className={event.level}>{event.level === 'success' ? <Check size={13} /> : event.level === 'error' ? <X size={13} /> : <Circle size={9} />}</span><section><strong>{event.message}</strong><small>{new Date(event.created_at).toLocaleString()}</small></section></div>)}</div></div>}
         </section>
-        <footer className="approval-bar"><div><span className="stage-icon">{isWorking ? <LoaderCircle className="spin" size={18} /> : <CheckCircle2 size={18} />}</span><div><strong>{isWorking ? currentWorkingLabel : stage.title}</strong><small>{isWorking ? 'You can keep reviewing the current workspace.' : contractError || approvalHint(project)}</small></div></div><button className="button primary" disabled={isWorking || Boolean(contractError) || project.stage === 'deploy'} title={contractError || undefined} onClick={advance}>{project.stage === 'deploy' ? <><Globe2 size={15} />{project.published_version ? 'Published' : 'Ready to publish'}</> : <>{project.stage === 'build' ? (project.phase_index ? `Approve phase ${project.phase_index}` : 'Build phase 1') : stage.action}<ArrowRight size={15} /></>}</button></footer>
+        <footer className="approval-bar"><div><span className="stage-icon">{isWorking ? <LoaderCircle className="spin" size={18} /> : <CheckCircle2 size={18} />}</span><div><strong>{isWorking ? currentWorkingLabel : stage.title}</strong><small>{isWorking ? 'You can keep reviewing the current workspace.' : contractError || approvalHint(project)}</small></div></div>{isWorking && project.active_job && <CancelJobButton cancelling={isCancelling} onCancel={cancelActiveJob} />}<button className="button primary" disabled={isWorking || Boolean(contractError) || project.stage === 'deploy'} title={contractError || undefined} onClick={advance}>{project.stage === 'deploy' ? <><Globe2 size={15} />{project.published_version ? 'Published' : 'Ready to publish'}</> : <>{project.stage === 'build' ? (project.phase_index ? `Approve phase ${project.phase_index}` : 'Build phase 1') : stage.action}<ArrowRight size={15} /></>}</button></footer>
       </main>
     </div>
     {showArchitecture && <Modal title={project.backend_mode === 'fastapi' ? 'Move to frontend-only?' : 'Add a FastAPI backend?'} eyebrow="APPLICATION ARCHITECTURE" onClose={() => !busy && setShowArchitecture(false)} className="architecture-modal">
