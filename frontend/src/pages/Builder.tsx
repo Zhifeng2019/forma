@@ -12,6 +12,7 @@ import { SourcePanel } from '../components/SourcePanel'
 import { contractApprovalError, SpecReview } from '../components/SpecReview'
 import { VerificationPanel } from '../components/VerificationPanel'
 import { CancelJobButton } from '../components/CancelJobButton'
+import { useProjectEvents } from '../useProjectEvents'
 
 const stages = [
   { id: 'discovery', short: 'Describe', title: 'Product description', action: 'Approve description' },
@@ -95,6 +96,10 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
     window.addEventListener('message', handler); return () => window.removeEventListener('message', handler)
   }, [])
   useEffect(() => { frameRef.current?.contentWindow?.postMessage({ type: 'forma-picker', enabled: picking }, '*') }, [picking, previewKey])
+
+  const eventEnabled = Boolean(project && (busy || project.status === 'working' || project.verification_running))
+  const eventRefresh = useCallback(async () => { await load() }, [load])
+  useProjectEvents(id, eventEnabled, eventRefresh)
 
   if (!project) return <div className="app-loading"><LogoMark /><span>{error || 'Preparing your workspace…'}</span>{error && <button className="button secondary" onClick={() => navigate('/')}>Back to projects</button>}</div>
   const stage = stages[project.stage_index] || stages[0]

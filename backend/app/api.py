@@ -16,7 +16,7 @@ from .config import settings
 from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manager
 from .frontend_builder import PackageBuildError, deployment_archive, ensure_frontend_build, frontend_asset_path
 from .features import FeatureFlag, feature_enabled
-from .jobs.events import high_watermark, replay_events, replay_frames
+from .jobs.events import follow_frames, high_watermark, replay_events, replay_frames
 from .jobs.leases import request_cancellation
 from .jobs.models import JobCancelledError
 from .jobs.service import active_job, get_job
@@ -313,7 +313,8 @@ def get_project(project_id: str, user=Depends(current_user)):
 @router.get('/projects/{project_id}/events')
 def project_events(
     project_id: str, request: Request, after: int | None = None,
-    limit: int = Query(200, ge=1, le=500), user=Depends(current_user),
+    limit: int = Query(200, ge=1, le=500), follow: bool = False,
+    heartbeat_seconds: float = Query(15, gt=0, le=60), user=Depends(current_user),
 ):
     owned_project(user['id'], project_id)
     raw_cursor = request.headers.get('last-event-id')
@@ -329,8 +330,10 @@ def project_events(
             raise HTTPException(409, {'error': 'cursor_expired', 'high_watermark': high})
         events = replay_events(db, project_id, cursor, limit)
     cursor = events[-1]['id'] if events else cursor
+    frames = (follow_frames(user['id'], project_id, cursor, limit, heartbeat_seconds)
+              if follow else replay_frames(events, project_id, cursor))
     return StreamingResponse(
-        replay_frames(events, project_id, cursor),
+        frames,
         media_type='text/event-stream',
         headers={
             'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no',

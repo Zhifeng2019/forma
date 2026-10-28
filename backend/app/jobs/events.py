@@ -1,10 +1,12 @@
 """Versioned, content-safe job event envelopes and bounded SSE replay."""
 
+import asyncio
 from datetime import datetime, timezone
 import json
 import sqlite3
 
 from ..config import ROOT, settings
+from ..database import workspace_db
 from .processes import redact_output
 
 EVENT_SCHEMA_VERSION = '1.0'
@@ -92,3 +94,21 @@ def replay_frames(events: list[dict], project_id: str, after: int):
         'payload': {'count': len(events), 'high_watermark': cursor},
     }
     yield sse_frame(complete)
+
+
+async def follow_frames(
+    user_id: int, project_id: str, after: int, limit: int, heartbeat_seconds: float,
+):
+    """Tail persisted events without retaining a database connection across awaits."""
+    yield ': heartbeat\n\n'
+    yield 'retry: 1500\n\n'
+    cursor = after
+    while True:
+        with workspace_db(user_id) as db:
+            events = replay_events(db, project_id, cursor, limit)
+        for event in events:
+            cursor = event['id']
+            yield sse_frame(event)
+        if not events:
+            yield ': heartbeat\n\n'
+        await asyncio.sleep(heartbeat_seconds)
