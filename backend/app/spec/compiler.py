@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from ..backend_engine import BACKEND_PATH, REQUIREMENTS_PATH, has_forma_api, validate_application
+from ..features import FeatureFlag, feature_enabled
 from ..jobs.idempotency import canonical_input_hash
 from ..source_packages import validate_source_package
 from .dependencies import compile_dependency_files
@@ -47,14 +48,21 @@ def _compile_single_file(spec: AppSpec, source_files: dict[str, str]) -> dict[st
 
 def compile_package(
     spec: AppSpec | dict, source_files: dict[str, str] | None = None, phase: int = 1,
+    specialist_workers: bool | None = None,
 ) -> CompiledPackage:
     """Validate cross-contract policy before returning any buildable source."""
     spec = normalize_spec_manifest(parse_appspec(spec))
     source_format = spec.architecture.source_format
     synthesized = source_files is None
+    if specialist_workers is None:
+        specialist_workers = feature_enabled(FeatureFlag.SPECIALIST_WORKERS_V1)
     if synthesized:
-        from .source import synthesize_source
-        source_files = synthesize_source(spec, phase)
+        if specialist_workers:
+            from ..workers.supervisor import synthesize_worker_source
+            source_files = synthesize_worker_source(spec, phase)
+        else:
+            from .source import synthesize_source
+            source_files = synthesize_source(spec, phase)
     files = normalize_source_files(source_files, source_format)
     files = compile_dependency_files(spec, files)
     validate_manifest(spec, files)
@@ -68,5 +76,5 @@ def compile_package(
     manifest = build_manifest(spec, files, spec_hash)
     manifest['source_hash'] = source_hash
     if synthesized:
-        manifest['generation'] = {'mode': 'appspec', 'phase': phase}
+        manifest['generation'] = {'mode': 'supervised-workers' if specialist_workers else 'appspec', 'phase': phase}
     return CompiledPackage(spec, files, manifest, spec_hash, source_hash)

@@ -4,6 +4,8 @@ import copy
 import json
 
 from ..llm import complete_with_schema
+from ..workers.contracts import WorkerRole
+from ..workers.credentials import CredentialBroker
 from .contract import entity_contract
 from .defaults import default_api, default_dependencies, default_manifest, local_default_appspec
 from .schema import AppSpecError, parse_appspec
@@ -132,8 +134,9 @@ async def propose_appspec(
 ) -> AppSpec:
     if not provider:
         return _local_proposal(name, brief, source_format, backend_mode, feedback, current_spec)
+    supervised_provider = CredentialBroker(provider).for_role(WorkerRole.SUPERVISOR)
     prompt = proposal_prompt(name, brief, source_format, backend_mode, phase, feedback, current_spec)
-    proposal = await complete_with_schema(provider, SYSTEM, prompt, proposal_json_schema(), 'forma_appspec')
+    proposal = await complete_with_schema(supervised_provider, SYSTEM, prompt, proposal_json_schema(), 'forma_appspec')
     try:
         return _validate_proposal(_normalize_proposal(proposal, name, source_format, backend_mode))
     except AppSpecError as exc:
@@ -145,6 +148,6 @@ async def propose_appspec(
         if PROPOSAL_REPAIR_ATTEMPTS != 1:
             raise
         corrected = await complete_with_schema(
-            provider, SYSTEM, repair, proposal_json_schema(), 'forma_appspec',
+            supervised_provider, SYSTEM, repair, proposal_json_schema(), 'forma_appspec',
         )
         return _validate_proposal(_normalize_proposal(corrected, name, source_format, backend_mode))
