@@ -20,6 +20,7 @@ from .jobs.events import follow_frames, high_watermark, replay_events, replay_fr
 from .jobs.leases import request_cancellation
 from .jobs.models import JobCancelledError
 from .jobs.service import active_job, get_job
+from .jobs.usage_report import project_usage
 from .spec.review import appspec_review
 from .deployment_registry import delete_deployment, upsert_deployment
 
@@ -349,6 +350,12 @@ def project_events(
             'Connection': 'keep-alive', 'X-Event-Cursor': str(cursor),
         },
     )
+
+
+@router.get('/projects/{project_id}/usage')
+def usage_report(project_id: str, user=Depends(current_user)):
+    owned_project(user['id'], project_id)
+    return project_usage(user['id'], project_id)
 
 
 @router.get('/projects/{project_id}/verification')

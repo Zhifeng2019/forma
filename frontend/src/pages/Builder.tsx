@@ -12,6 +12,7 @@ import { SourcePanel } from '../components/SourcePanel'
 import { contractApprovalError, SpecReview } from '../components/SpecReview'
 import { VerificationPanel } from '../components/VerificationPanel'
 import { CancelJobButton } from '../components/CancelJobButton'
+import { UsagePanel } from '../components/UsagePanel'
 import { useProjectEvents } from '../useProjectEvents'
 
 const stages = [
@@ -217,7 +218,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
           {tab === 'verification' && <VerificationPanel project={project} onVerify={runVerification} busy={Boolean(isWorking)} />}
           {tab === 'source' && <SourcePanel project={project} />}
           {tab === 'server' && project.backend_mode === 'fastapi' && <BackendPanel project={project} onChanged={() => void load()} />}
-          {tab === 'activity' && <div className="activity-view"><div className="activity-heading"><span className="eyebrow">PROJECT TIMELINE</span><h2>Every step, in the open.</h2><p>A clear record of your product team’s work and releases.</p></div><div className="timeline">{project.events.map(event => <div key={event.id}><span className={event.level}>{event.level === 'success' ? <Check size={13} /> : event.level === 'error' ? <X size={13} /> : <Circle size={9} />}</span><section><strong>{event.message}</strong><small>{new Date(event.created_at).toLocaleString()}</small></section></div>)}</div></div>}
+          {tab === 'activity' && <div className="activity-view"><div className="activity-heading"><span className="eyebrow">PROJECT TIMELINE</span><h2>Every step, in the open.</h2><p>A clear record of your product team’s work and releases.</p></div><UsagePanel projectId={project.id} updatedAt={project.updated_at} /><div className="timeline">{project.events.map(event => <div key={event.id}><span className={event.level}>{event.level === 'success' ? <Check size={13} /> : event.level === 'error' ? <X size={13} /> : <Circle size={9} />}</span><section><strong>{event.message}</strong><small>{new Date(event.created_at).toLocaleString()}</small></section></div>)}</div></div>}
         </section>
         <footer className="approval-bar"><div><span className="stage-icon">{isWorking ? <LoaderCircle className="spin" size={18} /> : <CheckCircle2 size={18} />}</span><div><strong>{isWorking ? currentWorkingLabel : stage.title}</strong><small>{isWorking ? 'You can keep reviewing the current workspace.' : contractError || approvalHint(project)}</small></div></div>{isWorking && project.active_job && <CancelJobButton cancelling={isCancelling} onCancel={cancelActiveJob} />}<button className="button primary" disabled={isWorking || Boolean(contractError) || project.stage === 'deploy'} title={contractError || undefined} onClick={advance}>{project.stage === 'deploy' ? <><Globe2 size={15} />{project.published_version ? 'Published' : 'Ready to publish'}</> : <>{project.stage === 'build' ? (project.phase_index ? `Approve phase ${project.phase_index}` : 'Build phase 1') : stage.action}<ArrowRight size={15} /></>}</button></footer>
       </main>

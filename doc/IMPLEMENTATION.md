@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-28
 
-**Current focus:** JOB-07D — owner-only inspection and aggregation (next slice; not started)
+**Current focus:** Pre-specialist checkpoint review — WRK-01 remains disabled pending owner acceptance
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -94,15 +94,15 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 - [x] **JOB-04 — Preserve synchronous and deferred behavior.** Engine wrappers route deferred and synchronous work through the durable runner under `DURABLE_JOBS_V1`; legacy scheduling remains the fallback.
 - [x] **JOB-05 — Resumable event delivery.** Versioned replay, live delivery, reconnect, polling fallback, authoritative reconciliation, and fault coverage are complete.
 - [x] **JOB-06 — End-to-end cooperative cancellation.** Cancellation is owner-scoped and idempotent, with attempt-scoped context, provider/process cleanup, atomic finalization guards, rollback of attempt-owned source and reports, and a busy-state Builder cancel control.
-- [ ] **JOB-07 — Usage and provenance tracking.** Wire provider/model, tokens, cost, retries, build duration, runtime health, and source hashes into tool runs and the usage ledger.
+- [x] **JOB-07 — Usage and provenance tracking.** Provider/model usage, honest costs, retries, tool durations, runtime health, and source/spec provenance are persisted, aggregated, and visible to project owners.
 
-**Milestone gate:** `[ ]` Telemetry remains open; event delivery and cancellation are complete.
+**Milestone gate:** `[x]` Durable orchestration, resumable delivery, cancellation, and owner-only telemetry are complete and verified.
 
-**Deferred by design:** BASE-01, BASE-03, JOB-05, and JOB-06 are complete. JOB-07D still needs owner-only usage inspection and aggregation. It remains a deliberate follow-up before specialist workers, not a completed capability or a forgotten task.
+**Deferred by design:** The BASE/JOB readiness checkpoint is complete. Specialist workers remain deferred pending explicit owner acceptance; passing tests does not enable WRK-01.
 
 ## Next checkpoint — BASE/JOB pre-specialist readiness
 
-**Checkpoint status:** `[ ]` In progress — BASE-01, BASE-03, JOB-06, JOB-05A–C, and JOB-07A–C are complete; JOB-07D is the next review slice.
+**Checkpoint status:** `[x]` Complete — BASE-01, BASE-03, JOB-05A–C, JOB-06A–C, and JOB-07A–D are verified. Ready for owner review; WRK-01 remains disabled.
 
 **Starting revision:** `a706e5a` (`Gate new releases with deterministic verification`).
 
@@ -166,7 +166,7 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 - [x] **JOB-07A — Shared tool-run envelope.** `backend/app/jobs/tool_runs.py` provides immutable attempt-owned envelopes and terminal finalization for tool name/version, input hash, redacted output reference, status, retry sequence, start/end/duration, and spec/source provenance. Shared redaction removes credentials and URL queries. Provider HTTP requests, subprocess-based build/install and dependency checks, runtime launch/health, and verification checks persist distinct spans; schema fallback and output repair use an independent HTTP request sequence without changing repair limits. Detached legacy contexts remain uninstrumented, and existing verification report IDs and cancellation behavior are preserved.
 - [x] **JOB-07B — Model usage and honest cost estimates.** `backend/app/jobs/usage.py` observes every provider HTTP response without changing the existing generation wrappers or repair budget. Usage rows link to their tool run and snapshot provider/model, request ID, finish reason, initial/fallback/output-repair reason, retry sequence, latency, and reported prompt/completion/total tokens. Availability is explicitly `reported`, `partial`, or `unavailable`; missing totals are not fabricated. Optional provider input/output prices per million tokens and currency are migrated and configurable in Administration, then snapshotted into each row. Computed costs are labelled estimates; missing tokens or prices remain `unknown`, while explicit zero usage and zero prices produce a legitimate estimated `$0`. Forma Local emits no synthetic model usage, and additive migrations preserve historical rows with explicit unknown defaults.
 - [x] **JOB-07C — Build/runtime provenance.** Process spans record actual executable versions, host Python/platform details, retry sequences, durations, and terminal status with caller-supplied source/spec/package inputs. Node dependency reuse/install, Vite staging/build/promotion and cache hits, Python environment probes/install, runtime environment/reuse/launch/health, and verification now carry cache outcomes and source/spec/package or requirements hashes. Private indexes, raw environments, prompt bodies, access tokens, URL queries, and credentials remain excluded or redacted. Existing build digests, immutable-version staging, verification report IDs, historical rows, and detached legacy behavior remain unchanged; real Vite, repeated-cache, runtime-reuse, and live FastAPI verification tests prove the contract.
-- [ ] **JOB-07D — Owner-only inspection and aggregation.** Add `GET /api/projects/{project_id}/usage` and a read-only Activity view for per-job and project totals, token availability, estimated/unknown cost, retries, tool durations, runtime health, and source/spec provenance. Test aggregation across attempts, cancelled-span closure, absent usage/pricing, legacy records, ownership checks, and secret scanning. Real-provider usage smoke remains opt-in.
+- [x] **JOB-07D — Owner-only inspection and aggregation.** `GET /api/projects/{project_id}/usage` returns redacted per-job and project totals for tool runs, model requests, token availability, estimated/partial/unknown cost, retries, durations, runtime health, and source/spec hashes. The read-only Activity usage panel refreshes with project updates and exposes expandable per-job tool evidence. Aggregation preserves partial data rather than treating it as complete; cancelled/failed finalization closes abandoned spans, legacy running spans are reported with terminal-job semantics, and ownership isolation and secret scanning are tested. Real-provider usage smoke remains opt-in and was not required for offline acceptance.
 
 **Primary files:** `backend/app/llm.py`, the new shared tool-run service, provider configuration/schemas, build/runtime/verification instrumentation, `usage_ledger`, and an owner-only usage API/UI.
 
@@ -174,13 +174,13 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 
 ### Checkpoint exit gate for specialist workers
 
-- [ ] All BASE-01, BASE-03, JOB-05, JOB-06, and JOB-07 subtasks are complete, and the Milestone 0/1 gates are checked with dated evidence.
-- [ ] Two offline baseline captures are semantically identical, comparison detects an injected regression, and the complete fixture matrix passes from a fresh temporary workspace.
-- [ ] Cancellation/finalization fault tests leave no owned process, listener, staging directory, or duplicate finalization; existing published releases remain available.
-- [ ] SSE reconnect and polling fallback pass without event loss, duplicate project transitions, duplicate versions, or leaked subscriptions.
-- [ ] Model, build, runtime, and verification tool runs link to their job/attempt and source/spec hashes; token/cost availability and estimates are represented honestly with no secret leakage.
-- [ ] Full backend/frontend regressions, both architecture browser flows, release-gate tests, production build, and Ruff pass. Test servers and generated processes are stopped.
-- [ ] Update this tracker and README with actual evidence. WRK-01 may begin only after the user accepts this checkpoint; passing these tests does not automatically enable specialist workers.
+- [x] All BASE-01, BASE-03, JOB-05, JOB-06, and JOB-07 subtasks are complete, and the Milestone 0/1 gates are checked with dated evidence.
+- [x] Two offline baseline captures are semantically identical, comparison detects an injected regression, and the complete fixture matrix passes from a fresh temporary workspace.
+- [x] Cancellation/finalization fault tests leave no owned process, listener, staging directory, or duplicate finalization; existing published releases remain available.
+- [x] SSE reconnect and polling fallback pass without event loss, duplicate project transitions, duplicate versions, or leaked subscriptions.
+- [x] Model, build, runtime, and verification tool runs link to their job/attempt and source/spec hashes; token/cost availability and estimates are represented honestly with no secret leakage.
+- [x] Full backend/frontend regressions, both architecture browser flows, release-gate tests, production build, and Ruff pass. Test servers and generated processes are stopped.
+- [x] Update this tracker and README with actual evidence. WRK-01 may begin only after the user accepts this checkpoint; passing these tests does not automatically enable specialist workers.
 
 **Non-goals for this checkpoint:** WebSockets, a distributed event bus, automatic model-price discovery, budget enforcement, multi-worker orchestration, specialist-worker implementation, sandboxing, and preview/published data isolation remain separate work.
 
@@ -262,3 +262,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-28 | JOB-07A shared tool-run envelope | Provider fallback sequencing, process success/failure, detached cancellation, redaction, spec/source provenance, real verifier build and runtime launch/health, two quality evaluations, and full regressions | 194 backend and 16 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-28 | JOB-07B model usage and honest costs | Reported/partial/missing tokens, unknown versus free costs, provider pricing API/migrations, schema fallback and output-repair observations, two quality evaluations, and full regressions | 200 backend and 16 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-28 | JOB-07C build/runtime provenance | Executable versions, source/spec/package hashes, cache hits, staging/promotion, dependency probes, runtime reuse/launch/health, real Vite and FastAPI verification, two quality evaluations, and full regressions | 202 backend and 16 frontend unit tests passed; production build and Ruff clean |
+| 2026-10-28 | JOB-07D owner-only usage and BASE/JOB checkpoint | Per-job/project aggregation, partial token/cost semantics, cancelled-span closure, legacy handling, ownership and secret checks, Activity usage view, two quality evaluations, and full regressions | 204 backend and 18 frontend unit tests passed; 1 usage browser journey passed; production build and Ruff clean; WRK-01 remains gated on owner acceptance |

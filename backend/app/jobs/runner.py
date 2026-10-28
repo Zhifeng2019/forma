@@ -17,6 +17,7 @@ from .snapshots import (
     capture_attempt_snapshot, discard_attempt_snapshot, rollback_attempt_snapshot,
 )
 from .transactions import job_transaction
+from .tool_runs import close_open_tool_runs
 
 _ACTIVE_STATUSES = {
     JobStatus.QUEUED.value,
@@ -111,6 +112,7 @@ def _mark_cancelling(user_id: int, job_id: str, attempt: dict) -> None:
 
 
 def _cancel_attempt(user_id: int, project_id: str, job_id: str, attempt: dict, message: str) -> None:
+    close_open_tool_runs(user_id, job_id, attempt['attempt_id'], 'cancelled', 'job_cancelled')
     with workspace_db(user_id) as db:
         with job_transaction(db):
             complete_attempt(db, attempt['attempt_id'], JobStatus.CANCELLED.value, 'cancelled')
@@ -121,6 +123,7 @@ def _cancel_attempt(user_id: int, project_id: str, job_id: str, attempt: dict, m
 
 
 def _fail_attempt(user_id: int, job_id: str, attempt: dict, exc: BaseException) -> None:
+    close_open_tool_runs(user_id, job_id, attempt['attempt_id'], 'failed', 'job_failed')
     with workspace_db(user_id) as db:
         with job_transaction(db):
             complete_attempt(db, attempt['attempt_id'], JobStatus.FAILED.value, type(exc).__name__)
@@ -197,6 +200,9 @@ async def run_generation_job(
                         record_event(db, job_id, 'failed', {'reason': 'Project generation failed'},
                                      f'{attempt["attempt_id"]}:failed')
                         _record_project_refresh(db, job_id, attempt, 'failed')
+                        close_open_tool_runs(
+                            user_id, job_id, attempt['attempt_id'], 'failed', 'open_at_job_completion',
+                        )
                         return True
                     finalize_job(db, attempt, input_hash)
                     record_event(db, job_id, 'job.succeeded', {
@@ -211,6 +217,7 @@ async def run_generation_job(
             rollback_attempt_snapshot(snapshot)
             _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation cancelled. Retry this stage.')
             return True
+        close_open_tool_runs(user_id, job_id, attempt['attempt_id'], 'failed', 'open_at_job_completion')
         return True
     except JobCancelledError:
         _mark_cancelling(user_id, job_id, attempt)

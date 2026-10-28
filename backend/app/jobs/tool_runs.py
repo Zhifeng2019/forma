@@ -137,3 +137,31 @@ def finish_tool_run(
             json.dumps(metadata, sort_keys=True, default=str), run.id,
         ))
     return finished
+
+
+def close_open_tool_runs(user_id: int, job_id: str, attempt_id: int, status: str, reason: str) -> int:
+    """Close abandoned spans without changing already-terminal tool records."""
+    if status not in {'cancelled', 'failed'}:
+        raise ValueError('Interrupted tool runs must close as cancelled or failed')
+    ended_at = utc_now()
+    closed = 0
+    with workspace_db(user_id) as db:
+        rows = db.execute(
+            "SELECT id,started_at,provenance FROM tool_runs WHERE job_id=? AND attempt_id=? AND status='running'",
+            (job_id, attempt_id),
+        ).fetchall()
+        for row in rows:
+            provenance = json.loads(row['provenance'] or '{}')
+            try:
+                started = datetime.fromisoformat(row['started_at'].replace('Z', '+00:00'))
+                ended = datetime.fromisoformat(ended_at.replace('Z', '+00:00'))
+                duration_ms = max(0, round((ended - started).total_seconds() * 1000))
+            except (TypeError, ValueError):
+                duration_ms = 0
+            provenance.update({'duration_ms': duration_ms, 'closure_reason': reason})
+            db.execute(
+                'UPDATE tool_runs SET status=?,ended_at=?,provenance=? WHERE id=? AND status=\'running\'',
+                (status, ended_at, json.dumps(provenance, sort_keys=True), row['id']),
+            )
+            closed += 1
+    return closed
