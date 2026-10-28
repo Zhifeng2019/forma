@@ -4,17 +4,13 @@ import asyncio
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import re
 import signal
-from urllib.parse import urlsplit, urlunsplit
 import uuid
 
 from .context import JobContext, current_job_context
 from .models import JobCancelledError
-
-_SECRET = re.compile(r'(?i)(api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)')
-_BEARER = re.compile(r'(?i)(bearer\s+)([a-z0-9._~+/=-]+)')
-_URL = re.compile(r'https?://[^\s]+')
+from .redaction import redact_output
+from .tool_runs import finish_tool_run, start_tool_run
 
 
 class ProcessTimeoutError(TimeoutError):
@@ -25,25 +21,6 @@ class ProcessTimeoutError(TimeoutError):
 class ProcessResult:
     returncode: int
     output: str
-
-
-def redact_output(text: str) -> str:
-    text = _SECRET.sub(r'\1\2<redacted>', text)
-    text = _BEARER.sub(r'\1<redacted>', text)
-
-    def redact_url(match):
-        raw = match.group(0)
-        try:
-            parts = urlsplit(raw)
-            if not parts.hostname:
-                return '<redacted-url>'
-            host = parts.hostname
-            if parts.port:
-                host += f':{parts.port}'
-            return urlunsplit((parts.scheme, host, parts.path, '', ''))
-        except ValueError:
-            return '<redacted-url>'
-    return _URL.sub(redact_url, text)
 
 
 async def _read_output(stream: asyncio.StreamReader, limit: int) -> str:
@@ -87,10 +64,23 @@ async def run_process(
     if output_limit <= 0:
         raise ValueError('Process output limit must be positive')
     context = context or current_job_context()
-    process = await asyncio.create_subprocess_exec(
-        *command, cwd=cwd, env=env, stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True,
-    )
+    telemetry = None
+    if tool_run_id is None:
+        executable = Path(command[0]).name
+        telemetry = start_tool_run(
+            action, executable, {'command': command, 'cwd': str(cwd), 'timeout': timeout},
+            provenance={'action': action, 'executable': executable, 'timeout_seconds': timeout},
+        )
+        if telemetry:
+            tool_run_id = telemetry.id
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command, cwd=cwd, env=env, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True,
+        )
+    except Exception as exc:
+        finish_tool_run(telemetry, 'failed', error=f'{type(exc).__name__}: {exc}')
+        raise
     tool_run_id = tool_run_id or f'process-{uuid.uuid4().hex}'
     if context:
         context.own_tool(tool_run_id, process.pid)
@@ -106,13 +96,26 @@ async def run_process(
         if waiter not in done:
             await terminate_process_group(process, reader)
             raise ProcessTimeoutError(f'Timed out while trying to {action}. Please retry.')
-        return ProcessResult(process.returncode, await reader)
-    except asyncio.CancelledError:
-        await terminate_process_group(process, reader)
-        raise
-    except Exception:
+        result = ProcessResult(process.returncode, await reader)
+        finish_tool_run(
+            telemetry, 'succeeded' if result.returncode == 0 else 'failed',
+            provenance={'returncode': result.returncode},
+            error=None if result.returncode == 0 else result.output[-2000:],
+        )
+        return result
+    except JobCancelledError as exc:
         if process.returncode is None:
             await terminate_process_group(process, reader)
+        finish_tool_run(telemetry, 'cancelled', error=str(exc))
+        raise
+    except asyncio.CancelledError as exc:
+        await terminate_process_group(process, reader)
+        finish_tool_run(telemetry, 'cancelled', error=f'{type(exc).__name__}: {exc}')
+        raise
+    except Exception as exc:
+        if process.returncode is None:
+            await terminate_process_group(process, reader)
+        finish_tool_run(telemetry, 'failed', error=f'{type(exc).__name__}: {exc}')
         raise
     finally:
         waiter.cancel()

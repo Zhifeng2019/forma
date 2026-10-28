@@ -23,6 +23,7 @@ from .frontend_builder import PackageBuildError, write_source_files
 from .jobs.context import current_job_context
 from .jobs.models import JobCancelledError
 from .jobs.processes import run_process
+from .jobs.tool_runs import finish_tool_run, start_tool_run
 
 
 class RuntimeLaunchError(RuntimeError):
@@ -249,17 +250,27 @@ class RuntimeManager:
         context = current_job_context()
         if context:
             context.raise_if_cancelled()
-        tool_run_id = f'runtime-start:{key}'
+        launch = start_tool_run(
+            'runtime.launch', 'uvicorn',
+            {'project_id': project_id, 'version': version, 'channel': channel, 'source_dir': str(source_dir)},
+            provenance={'project_id': project_id, 'version': version, 'channel': channel},
+        )
+        tool_run_id = launch.id if launch else f'runtime-start:{key}'
         port = self._free_port()
         logs = self._logs.setdefault(key, deque(maxlen=120))
         logs.append(f'Starting FastAPI version {version} ({channel})')
         launcher = Path(__file__).with_name('runtime_launcher.py')
-        process = await asyncio.create_subprocess_exec(
-            str(python), str(launcher), str(settings.runtime_memory_mb), str(source_dir), str(port),
-            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT, cwd=work,
-            env=self._clean_environment(work, environment), start_new_session=True,
-        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                str(python), str(launcher), str(settings.runtime_memory_mb), str(source_dir), str(port),
+                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT, cwd=work,
+                env=self._clean_environment(work, environment), start_new_session=True,
+            )
+        except Exception as exc:
+            finish_tool_run(launch, 'failed', error=f'{type(exc).__name__}: {exc}')
+            raise
+        finish_tool_run(launch, 'succeeded', provenance={'port': port, 'process_group_id': process.pid})
         if context:
             context.own_tool(tool_run_id, process.pid)
         reader = asyncio.create_task(self._drain_logs(key, process.stdout))
@@ -307,22 +318,42 @@ class RuntimeManager:
         url = f'http://127.0.0.1:{runtime.port}/api/health'
         deadline = time.monotonic() + settings.runtime_start_timeout
         context = current_job_context()
-        async with httpx.AsyncClient(timeout=2, trust_env=False) as client:
-            while time.monotonic() < deadline:
-                if context:
-                    context.raise_if_cancelled()
-                if runtime.process.returncode is not None:
-                    await asyncio.sleep(0)
-                    tail = '\n'.join(list(self._logs[runtime.key])[-8:])
-                    raise RuntimeLaunchError(f'The generated backend exited during startup.\n{tail[-2500:]}')
-                try:
-                    response = await client.get(url)
-                    if response.status_code == 200:
-                        return
-                except httpx.HTTPError:
-                    pass
-                await asyncio.sleep(0.25)
-        raise RuntimeLaunchError('The backend did not pass its health check in time. Inspect the runtime log and retry.')
+        health = start_tool_run(
+            'runtime.health', 'http.health.v1',
+            {'project_id': runtime.project_id, 'version': runtime.version, 'channel': runtime.channel, 'url': url},
+            provenance={'project_id': runtime.project_id, 'version': runtime.version, 'channel': runtime.channel},
+        )
+        attempts = 0
+        try:
+            async with httpx.AsyncClient(timeout=2, trust_env=False) as client:
+                while time.monotonic() < deadline:
+                    if context:
+                        context.raise_if_cancelled()
+                    if runtime.process.returncode is not None:
+                        await asyncio.sleep(0)
+                        tail = '\n'.join(list(self._logs[runtime.key])[-8:])
+                        raise RuntimeLaunchError(f'The generated backend exited during startup.\n{tail[-2500:]}')
+                    try:
+                        attempts += 1
+                        response = await client.get(url)
+                        if response.status_code == 200:
+                            finish_tool_run(
+                                health, 'succeeded',
+                                provenance={'http_status': response.status_code, 'poll_attempts': attempts},
+                            )
+                            return
+                    except httpx.HTTPError:
+                        pass
+                    await asyncio.sleep(0.25)
+            raise RuntimeLaunchError('The backend did not pass its health check in time. Inspect the runtime log and retry.')
+        except (JobCancelledError, asyncio.CancelledError) as exc:
+            finish_tool_run(health, 'cancelled', provenance={'poll_attempts': attempts}, error=str(exc))
+            raise
+        except Exception as exc:
+            finish_tool_run(
+                health, 'failed', provenance={'poll_attempts': attempts}, error=f'{type(exc).__name__}: {exc}',
+            )
+            raise
 
     async def request(
         self,

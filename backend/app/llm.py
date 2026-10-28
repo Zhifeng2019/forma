@@ -59,27 +59,50 @@ async def complete_with_schema(
     return await _complete(provider, system, prompt, response_format, allow_json_fallback=True)
 
 
-async def _post_with_cancellation(client, url, kwargs):
+async def _post_with_cancellation(client, url, kwargs, tool_metadata=None):
     context = current_job_context()
     if context:
         context.raise_if_cancelled()
-    request = asyncio.create_task(client.post(url, **kwargs))
-    if not context:
-        return await request
-    cancellation_waiter = asyncio.create_task(context.cancellation.wait())
-    try:
-        done, _ = await asyncio.wait(
-            {request, cancellation_waiter}, return_when=asyncio.FIRST_COMPLETED,
+    run = None
+    if tool_metadata:
+        from .jobs.tool_runs import start_tool_run, finish_tool_run
+        run = start_tool_run(
+            'provider.http', 'openai-compatible.chat-completions.v1', tool_metadata['input'],
+            retry_count=tool_metadata['retry_count'], provenance=tool_metadata['provenance'],
         )
-        if cancellation_waiter in done:
-            request.cancel()
-            await asyncio.gather(request, return_exceptions=True)
-            context.raise_if_cancelled()
+    request = asyncio.create_task(client.post(url, **kwargs))
+    cancellation_waiter = asyncio.create_task(context.cancellation.wait()) if context else None
+    try:
+        if cancellation_waiter:
+            done, _ = await asyncio.wait(
+                {request, cancellation_waiter}, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancellation_waiter in done:
+                request.cancel()
+                await asyncio.gather(request, return_exceptions=True)
+                context.raise_if_cancelled()
         response = await request
-        context.raise_if_cancelled()
+        if context:
+            context.raise_if_cancelled()
+        if run:
+            succeeded = response.status_code < 400
+            finish_tool_run(
+                run, 'succeeded' if succeeded else 'failed',
+                provenance={'http_status': response.status_code},
+                error=None if succeeded else f'Provider HTTP {response.status_code}',
+            )
         return response
+    except (JobCancelledError, asyncio.CancelledError) as exc:
+        if run:
+            finish_tool_run(run, 'cancelled', error=f'{type(exc).__name__}: {exc}')
+        raise
+    except Exception as exc:
+        if run:
+            finish_tool_run(run, 'failed', error=f'{type(exc).__name__}: {exc}')
+        raise
     finally:
-        cancellation_waiter.cancel()
+        if cancellation_waiter:
+            cancellation_waiter.cancel()
 
 
 async def _complete(
@@ -100,13 +123,26 @@ async def _complete(
         # not prevent the OpenAI-compatible client from initializing.
         async with httpx.AsyncClient(timeout=240, trust_env=False) as client:
             attempt = 0
+            request_sequence = 0
             while attempt <= OUTPUT_REPAIR_ATTEMPTS:
                 response = await _post_with_cancellation(client, url, {
                     'headers': {'Authorization': f'Bearer {decrypt_secret(provider["api_key_encrypted"])}'},
                     'json': {'model': provider['model'], 'messages': messages,
                              'temperature': 0.35, 'response_format': response_format,
                              'max_tokens': MAX_OUTPUT_TOKENS, **_inference_options(provider)},
+                }, tool_metadata={
+                    'input': {
+                        'provider': provider['name'], 'model': provider['model'],
+                        'response_format': response_format,
+                    },
+                    'retry_count': request_sequence,
+                    'provenance': {
+                        'provider': provider['name'], 'model': provider['model'],
+                        'response_format_type': response_format.get('type'),
+                        'schema_name': response_format.get('json_schema', {}).get('name'),
+                    },
                 })
+                request_sequence += 1
                 if response.status_code >= 400:
                     if (allow_json_fallback and response_format.get('type') == 'json_schema'
                             and response.status_code in {400, 404, 422}):

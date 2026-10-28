@@ -7,7 +7,7 @@ import sqlite3
 
 from ..config import ROOT, settings
 from ..database import workspace_db
-from .processes import redact_output
+from .redaction import redact_output
 
 EVENT_SCHEMA_VERSION = '1.0'
 EVENT_TYPES = {

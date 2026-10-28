@@ -117,7 +117,11 @@ def test_verification_persists_tool_runs_and_force_retries():
     retried = asyncio.run(verify_package(user_id, project_id, 1, force=True, config=enabled()))
     assert retried['attempt_id'] == 2
     with workspace_db(user_id) as db:
-        assert db.execute('SELECT COUNT(*) FROM tool_runs WHERE job_id=?', (first['job_id'],)).fetchone()[0] == 4
+        check_runs = db.execute('''SELECT provenance FROM tool_runs WHERE job_id=?
+            AND tool_name IN ('studio:frontend-build','acceptance/security_tests.py')''', (first['job_id'],)).fetchall()
+        assert len(check_runs) == 4
+        assert all({'spec_hash', 'source_hash', 'duration_ms'} <= json.loads(row['provenance']).keys()
+                   for row in check_runs)
         assert db.execute('SELECT current_attempt FROM generation_jobs WHERE id=?', (first['job_id'],)).fetchone()[0] == 2
         artifact = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=1',
                               (project_id, 'acceptance/report.json')).fetchone()
@@ -238,6 +242,12 @@ def test_live_package_verification_with_runtime_and_security():
     assert report['complete_coverage'] is False and report['can_publish'] is False
     assert report['spec_hash'] == package.spec_hash and report['source_hash'] == package.source_hash
     assert asyncio.run(runtime_manager.status(project_id, 1))['status'] == 'stopped'
+    with workspace_db(user_id) as db:
+        runtime_runs = db.execute('''SELECT tool_name,status FROM tool_runs WHERE job_id=?
+            AND tool_name IN ('runtime.launch','runtime.health') ORDER BY rowid''', (report['job_id'],)).fetchall()
+    assert [(row['tool_name'], row['status']) for row in runtime_runs] == [
+        ('runtime.launch', 'succeeded'), ('runtime.health', 'succeeded'),
+    ]
 
 
 def test_single_file_verification_materializes_source_before_build():

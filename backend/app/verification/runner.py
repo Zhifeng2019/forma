@@ -7,7 +7,6 @@ from pathlib import Path
 import sys
 import time
 from urllib.parse import quote
-import uuid
 
 from ..config import ROOT, Settings, settings
 from ..database import workspace_db
@@ -20,6 +19,7 @@ from ..jobs.models import JobCancelledError
 from ..jobs.processes import run_process
 from ..jobs.runner import run_generation_job
 from ..jobs.service import record_event
+from ..jobs.tool_runs import finish_tool_run, start_tool_run
 from ..llm import GenerationError
 from ..runtime import runtime_manager
 from ..security import create_token
@@ -132,35 +132,6 @@ async def _add_runtime_environment(user_id: int, project_id: str, version: int, 
     return status['status'] != 'running'
 
 
-def _record_tool_run(
-    user_id: int,
-    job_id: str,
-    attempt_id: int,
-    check: dict,
-    status: str,
-    started_at: str,
-    ended_at: str,
-    duration_ms: int,
-    error: str | None,
-) -> tuple[str, dict]:
-    tool_run_id = uuid.uuid4().hex
-    result = check_result(check, status, tool_run_id, duration_ms, error)
-    provenance = {
-        'environment': check['environment'], 'required': check['required'],
-        'mutates': check['mutates'], 'target': check['target'],
-    }
-    with workspace_db(user_id) as db:
-        db.execute('''INSERT INTO tool_runs(
-            id,job_id,attempt_id,tool_name,tool_version,input_hash,output_ref,status,retry_count,
-            started_at,ended_at,provenance)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''', (
-            tool_run_id, job_id, attempt_id, check['file'], COMPILER_VERSION,
-            canonical_input_hash(check), result['output_ref'], status, 0,
-            started_at, ended_at, json.dumps(provenance, sort_keys=True),
-        ))
-    return tool_run_id, result
-
-
 def _process_environment(root: Path, env: dict) -> dict:
     temporary = root / 'tmp'
     temporary.mkdir(parents=True, exist_ok=True)
@@ -183,8 +154,10 @@ def _process_environment(root: Path, env: dict) -> dict:
     }
 
 
-async def _execute_process(command: list[str], cwd: Path, env: dict, timeout: int) -> tuple[int, str]:
-    result = await run_process(command, cwd, env, timeout, 'execute an acceptance check')
+async def _execute_process(
+    command: list[str], cwd: Path, env: dict, timeout: int, tool_run_id: str,
+) -> tuple[int, str]:
+    result = await run_process(command, cwd, env, timeout, 'execute an acceptance check', tool_run_id=tool_run_id)
     return result.returncode, result.output[-4000:]
 
 
@@ -230,7 +203,18 @@ async def _execute_check(
     blocked_reason: str | None = None,
     failure_reason: str | None = None,
 ) -> dict:
-    started_at = utc_now()
+    run = start_tool_run(
+        check['file'], COMPILER_VERSION, check,
+        provenance={
+            'environment': check['environment'], 'required': check['required'],
+            'mutates': check['mutates'], 'target': check['target'],
+        },
+        output_ref=f'{check["file"]}#{check["test"]}',
+        spec_hash=context['spec_hash'], source_hash=context['source_hash'],
+        user_id=user_id, job_id=job_id, attempt_id=attempt_id,
+    )
+    if run is None:
+        raise RuntimeError('The verification job attempt is unavailable for tool-run persistence')
     started = time.monotonic()
     status = 'passed'
     error = None
@@ -248,7 +232,8 @@ async def _execute_check(
             else:
                 command, cwd = _command_for_check(version_directory(project_id, version), check)
                 returncode, output = await _execute_process(
-                    command, cwd, _process_environment(version_directory(project_id, version), env), check['timeout'],
+                    command, cwd, _process_environment(version_directory(project_id, version), env),
+                    check['timeout'], run.id,
                 )
                 if returncode:
                     status = 'failed'
@@ -258,8 +243,10 @@ async def _execute_check(
         error = f'{type(exc).__name__}: {str(exc)[:1800]}'
     ended_at = utc_now()
     duration_ms = max(0, round((time.monotonic() - started) * 1000))
-    _tool_run_id, result = _record_tool_run(
-        user_id, job_id, attempt_id, check, status, started_at, ended_at, duration_ms, error,
+    result = check_result(check, status, run.id, duration_ms, error)
+    finish_tool_run(
+        run, status, output_ref=result['output_ref'], error=error,
+        ended_at=ended_at, duration_ms=duration_ms,
     )
     return result
 
