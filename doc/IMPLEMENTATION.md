@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-30
 
-**Current focus:** SYS-02 — shared product UI foundation (next slice; not started)
+**Current focus:** SYS-03 — runtime evidence and cleanup ownership (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -12,7 +12,15 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — SYS-01 shared frontend correctness contracts
+## Latest completed increment — SYS-02 shared product UI foundation
+
+- [x] **SYS-02A — Additive presentation contract.** Optional headline, entity, action, and empty-state metadata drives product-facing copy while legacy AppSpecs retain their original hashes and receive deterministic defaults.
+- [x] **SYS-02B — Domain-aware labels.** Frontend and acceptance generators share one presentation resolver; entity labels come from domain semantics rather than transport paths, with no hard-coded per-application branches.
+- [x] **SYS-02C — Responsive design system.** Both source formats use reviewed design tokens, readable hero/workspace layouts, two-column forms, data cards, accessible focus states, and mobile layouts without horizontal overflow.
+- [x] **SYS-02D — Complete interface states.** Loading, empty, success, error, busy, offline, and read-only states replace immediate form resets and builder-facing AppSpec/phase language.
+- [x] **SYS-02E — Verification.** Cross-architecture contracts, real generated browser journeys, desktop/mobile visual review, worker provenance, full regressions, and a hash-stable Mini-Twitter canary pass.
+
+## Earlier completed increment — SYS-01 shared frontend correctness contracts
 
 - [x] **SYS-01A — Browser input adaptation.** Generated Playwright values are converted from ISO datetimes to `datetime-local`-compatible minutes without changing AppSpec field types or API payloads.
 - [x] **SYS-01B — Semantic heading contract.** Multi-file and single-file synthesis now emit one product-name `h1`, render the primary workflow as supporting text, and use a concise workspace heading; generated browser checks follow the same contract.
@@ -20,8 +28,6 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 - [x] **SYS-01D — Verification.** Full backend/frontend regressions, quality evaluations, production build, Ruff, and an in-memory Mini-Twitter AppSpec canary pass. Existing generated applications must be rebuilt to receive the new sources and acceptance artifacts.
 
 ## Planned system-wide corrective increments
-
-- [ ] **SYS-02 — Shared product UI foundation.** Presentation contracts, domain labels, responsive layouts, and complete interface states.
 - [ ] **SYS-03 — Runtime evidence and cleanup ownership.** Structured restart diagnostics, explicit version identity, and isolated cleanup outcomes.
 - [ ] **SYS-04 — Generated UI quality verification.** Responsive, accessibility, interaction-state, and screenshot evidence.
 - [ ] **SYS-05 — Product-capability honesty.** Detect unsupported briefs and expand workflow capabilities without app-specific exceptions.
@@ -285,3 +291,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-29 | RUN-01 production sandbox | Non-root read-only container, writable app work only, resource limits, in-image dependencies, port-forward health, shutdown cleanup, two quality evaluations, and full regressions | 231 backend and 19 frontend unit tests passed plus 1 real Docker smoke test; production build and Ruff clean |
 | 2026-10-29 | Mini-Twitter health contract normalization | Cleared entity assignment from `/api/health`, recovered AppSpec and Phase 1 through the live backend, two quality evaluations, and full regressions | 232 backend and 19 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-30 | SYS-01 shared frontend correctness contracts | Browser-only datetime adaptation, semantic product headings, eight-field cross-architecture fixture, real generated Playwright workflow, full regressions, and Mini-Twitter AppSpec canary | 239 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |
+| 2026-10-30 | SYS-02 shared product UI foundation | Additive presentation metadata, domain labels, responsive theme and layouts, complete asynchronous states, synchronized acceptance contracts, worker provenance, and desktop/mobile review | 242 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; five generated Playwright journeys, two quality evaluations, Mini-Twitter hash-stable canary, production build, and Ruff clean |

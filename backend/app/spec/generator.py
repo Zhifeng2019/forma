@@ -166,6 +166,7 @@ User feedback: {feedback or 'None'}
 Current AppSpec to preserve and refine: {current_json}
 
 Return one AppSpec proposal with product, entities, api, frontend, and acceptance sections.
+In frontend.presentation, provide a concise headline, singular/plural entity labels, a primary create label, and helpful empty-state copy. Do not repeat the long workflow in the headline.
 Use exactly one entity with one to eight non-ID fields. An integer id field is optional.
 Supported field kinds: string, text, integer, number, boolean, date, datetime, uuid.
 Supported constraints: minLength/maxLength for strings and minimum/maximum for numbers.

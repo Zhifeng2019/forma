@@ -50,6 +50,7 @@ def test_provider_proposal_uses_schema_and_studio_owned_policy(monkeypatch):
     prompt, schema, schema_name = calls[0]
     assert schema_name == 'forma_appspec'
     assert schema['required'] == ['product', 'entities', 'api', 'frontend', 'acceptance']
+    assert 'frontend.presentation' in prompt
     assert 'no source code, filenames' not in prompt  # The system prompt carries this rule.
     assert 'Do not return manifest, dependencies, architecture, source files, code' in prompt
     assert spec.product.name == 'Requested App'

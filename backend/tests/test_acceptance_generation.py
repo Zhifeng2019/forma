@@ -61,8 +61,8 @@ def test_acceptance_generation_is_deterministic_and_provenance_complete():
     for path in ('acceptance/api_tests.py', 'acceptance/security_tests.py', 'acceptance/migration_tests.py'):
         compile(first[path], path, 'exec')
     browser = first['acceptance/browser_tests.spec.js']
-    assert 'APP_PREVIEW_URL' in browser and 'Create record' in browser
-    assert 'Refresh data' in browser and 'Delete record' in browser
+    assert 'APP_PREVIEW_URL' in browser and 'Create item' in browser
+    assert 'Refresh data' in browser and 'Delete item' in browser
 
 
 def test_static_and_legacy_specs_generate_only_applicable_checks():

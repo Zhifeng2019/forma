@@ -52,11 +52,21 @@ class ApiOperationSpec(SpecModel):
     errors: list[str] = Field(default_factory=list, max_length=12)
 
 
+class PresentationSpec(SpecModel):
+    headline: str | None = Field(default=None, min_length=1, max_length=120)
+    entity_label: str | None = Field(default=None, min_length=1, max_length=60)
+    entity_plural_label: str | None = Field(default=None, min_length=1, max_length=60)
+    create_label: str | None = Field(default=None, min_length=1, max_length=80)
+    empty_title: str | None = Field(default=None, min_length=1, max_length=120)
+    empty_message: str | None = Field(default=None, min_length=1, max_length=300)
+
+
 class FrontendSpec(SpecModel):
     components: list[str] = Field(default_factory=list, max_length=32)
     routes: list[str] = Field(default_factory=list, max_length=32)
     state_adapter: Literal['browser-local', 'forma-api']
     accessibility: list[str] = Field(default_factory=list, max_length=16)
+    presentation: PresentationSpec | None = None
 
 
 class DependencySpec(SpecModel):
