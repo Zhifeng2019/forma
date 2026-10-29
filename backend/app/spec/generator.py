@@ -102,7 +102,9 @@ def _normalize_proposal(
             key = (operation.get('method'), operation.get('path'))
             if key not in allowed or key in seen:
                 continue
-            if operation['path'] != '/api/health' and not operation.get('entity'):
+            if operation['path'] == '/api/health':
+                operation['entity'] = None
+            elif not operation.get('entity'):
                 operation['entity'] = entity_name
             normalized.append(operation)
             seen.add(key)

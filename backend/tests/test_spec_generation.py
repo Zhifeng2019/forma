@@ -193,3 +193,18 @@ def test_duplicate_and_custom_api_operations_are_normalized(monkeypatch):
     ))
     assert sum(operation.method == 'GET' and operation.path == '/api/items' for operation in spec.api) == 1
     assert all(not operation.path.startswith('/api/auth') for operation in spec.api)
+
+
+def test_health_operation_cannot_reference_an_entity(monkeypatch):
+    document = proposal()
+    document['api'][0]['entity'] = 'Item'
+
+    async def complete(*_args):
+        return document
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Health App', 'A health workflow', 'multi-file', 'fastapi',
+    ))
+    health = next(operation for operation in spec.api if operation.path == '/api/health')
+    assert health.entity is None

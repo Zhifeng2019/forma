@@ -19,12 +19,14 @@ import time
 from .backend_engine import runtime_requirements
 from .config import settings
 from .engine import validate_project_id
+from .features import FeatureFlag, feature_enabled
 from .frontend_builder import PackageBuildError, write_source_files
 from .jobs.context import current_job_context
 from .jobs.idempotency import canonical_input_hash
 from .jobs.models import JobCancelledError
 from .jobs.processes import executable_version, run_process
 from .jobs.tool_runs import finish_tool_run, start_tool_run
+from .runtime_sandbox import DockerSandboxProcess, sandbox_manager
 
 
 class RuntimeLaunchError(RuntimeError):
@@ -37,11 +39,12 @@ class ManagedRuntime:
     project_id: str
     version: int
     channel: str
-    process: asyncio.subprocess.Process
+    process: object
     port: int
     started_at: str
     reader: asyncio.Task
     last_used: float
+    execution: str = 'isolated-process'
 
 
 class RuntimeManager:
@@ -331,7 +334,8 @@ class RuntimeManager:
             },
             provenance={
                 'project_id': project_id, 'version': version, 'channel': channel,
-                'server': 'uvicorn', **telemetry['provenance'],
+                'server': 'docker-container' if feature_enabled(FeatureFlag.SANDBOX_V1) else 'uvicorn',
+                **telemetry['provenance'],
             },
             spec_hash=telemetry.get('spec_hash'), source_hash=telemetry.get('source_hash'),
         )
@@ -340,17 +344,28 @@ class RuntimeManager:
         logs = self._logs.setdefault(key, deque(maxlen=120))
         logs.append(f'Starting FastAPI version {version} ({channel})')
         launcher = Path(__file__).with_name('runtime_launcher.py')
+        sandbox_enabled = feature_enabled(FeatureFlag.SANDBOX_V1)
+        requirements_file = source_dir / 'requirements.txt'
+        requirements = requirements_file.read_text() if requirements_file.exists() else ''
         try:
-            process = await asyncio.create_subprocess_exec(
-                str(python), str(launcher), str(settings.runtime_memory_mb), str(source_dir), str(port),
-                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT, cwd=work,
-                env=self._clean_environment(work, environment), start_new_session=True,
-            )
+            if sandbox_enabled:
+                process = await sandbox_manager.start(
+                    project_id, version, channel, source_dir, port, requirements, work,
+                )
+            else:
+                process = await asyncio.create_subprocess_exec(
+                    str(python), str(launcher), str(settings.runtime_memory_mb), str(source_dir), str(port),
+                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT, cwd=work,
+                    env=self._clean_environment(work, environment), start_new_session=True,
+                )
         except Exception as exc:
             finish_tool_run(launch, 'failed', error=f'{type(exc).__name__}: {exc}')
             raise
-        finish_tool_run(launch, 'succeeded', provenance={'port': port, 'process_group_id': process.pid})
+        finish_tool_run(launch, 'succeeded', provenance={
+            'port': port, 'process_group_id': process.pid,
+            'execution': 'docker-container' if sandbox_enabled else 'isolated-process',
+        })
         if context:
             context.own_tool(tool_run_id, process.pid)
         reader = asyncio.create_task(self._drain_logs(key, process.stdout))
@@ -358,6 +373,7 @@ class RuntimeManager:
             key=key, project_id=project_id, version=version, channel=channel,
             process=process, port=port, started_at=datetime.now(timezone.utc).isoformat(),
             reader=reader, last_used=time.monotonic(),
+            execution='docker-container' if sandbox_enabled else 'isolated-process',
         )
         self._runtimes[key] = runtime
         try:
@@ -495,7 +511,7 @@ class RuntimeManager:
             'started_at': runtime.started_at if runtime else None,
             'last_error': self._errors.get(key),
             'logs': '\n'.join(list(self._logs.get(key, []))[-60:]),
-            'execution': 'isolated-process',
+            'execution': runtime.execution if runtime else 'isolated-process',
         }
 
     async def restart(
@@ -554,7 +570,10 @@ class RuntimeManager:
         except (TimeoutError, asyncio.CancelledError):
             runtime.reader.cancel()
 
-    async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
+    async def _terminate_process(self, process: object) -> None:
+        if isinstance(process, DockerSandboxProcess):
+            await process.stop()
+            return
         if process.returncode is None:
             try:
                 os.killpg(process.pid, signal.SIGTERM)

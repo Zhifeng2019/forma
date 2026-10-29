@@ -30,7 +30,8 @@ def main() -> None:
     apply_limit(resource.RLIMIT_NOFILE, 256)
     command = [
         sys.executable, '-m', 'uvicorn', 'main:app',
-        '--host', '127.0.0.1', '--port', str(port), '--app-dir', source_dir,
+        '--host', os.environ.get('FORMA_RUNTIME_HOST', '127.0.0.1'),
+        '--port', str(port), '--app-dir', source_dir,
         '--lifespan', 'on', '--timeout-keep-alive', '5', '--limit-concurrency', '50',
     ]
     os.execve(sys.executable, command, os.environ)
