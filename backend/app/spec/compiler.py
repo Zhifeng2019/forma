@@ -54,12 +54,15 @@ def compile_package(
     spec = normalize_spec_manifest(parse_appspec(spec))
     source_format = spec.architecture.source_format
     synthesized = source_files is None
+    worker_provenance = []
     if specialist_workers is None:
         specialist_workers = feature_enabled(FeatureFlag.SPECIALIST_WORKERS_V1)
     if synthesized:
         if specialist_workers:
-            from ..workers.supervisor import synthesize_worker_source
-            source_files = synthesize_worker_source(spec, phase)
+            from ..workers.supervisor import synthesize_worker_execution
+            execution = synthesize_worker_execution(spec, phase)
+            source_files = execution.files
+            worker_provenance = [worker.as_dict() for worker in execution.workers]
         else:
             from .source import synthesize_source
             source_files = synthesize_source(spec, phase)
@@ -76,5 +79,7 @@ def compile_package(
     manifest = build_manifest(spec, files, spec_hash)
     manifest['source_hash'] = source_hash
     if synthesized:
-        manifest['generation'] = {'mode': 'supervised-workers' if specialist_workers else 'appspec', 'phase': phase}
+        manifest['generation'] = {'mode': 'supervised-parallel' if specialist_workers else 'appspec', 'phase': phase}
+        if specialist_workers:
+            manifest['generation']['workers'] = worker_provenance
     return CompiledPackage(spec, files, manifest, spec_hash, source_hash)

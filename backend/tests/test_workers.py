@@ -78,7 +78,7 @@ def test_supervised_synthesis_is_byte_equivalent_to_sequential_generation():
         assert supervised.files == sequential.files
         assert supervised.source_hash == sequential.source_hash
         assert supervised.spec_hash == sequential.spec_hash
-        assert supervised.manifest['generation']['mode'] == 'supervised-workers'
+        assert supervised.manifest['generation']['mode'] == 'supervised-parallel'
         assert sequential.manifest['generation']['mode'] == 'appspec'
 
 
@@ -91,4 +91,4 @@ def test_feature_flag_selects_supervised_generation_service(monkeypatch):
     compiled = asyncio.run(generate_appspec_package(
         project, None, 1, config=Settings(appspec_v1=True, specialist_workers_v1=True),
     ))
-    assert compiled.manifest['generation']['mode'] == 'supervised-workers'
+    assert compiled.manifest['generation']['mode'] == 'supervised-parallel'
