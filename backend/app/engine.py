@@ -233,9 +233,9 @@ async def _advance(
                 result = await complete(provider, 'You are a pragmatic technical lead.',
                     f'Product: {name}\nBrief: {brief}\nSelected architecture: {backend_mode}\nReturn {{"document":"markdown..."}} with exactly three implementation phases. Each phase must end in a shareable working page. For FastAPI apps, evolve the frontend and Python API together and include health and persistence checks.')
                 content = result.get('document', content)
-            save_artifact(db, project_id, 'plan', 'plan.md', content, 0)
             if feature_enabled(FeatureFlag.APPSPEC_V1):
                 await review_appspec(db, project, provider, brief)
+            save_artifact(db, project_id, 'plan', 'plan.md', content, 0)
             next_stage, index = 'build', 3
             message = 'The implementation is split into three shareable phases. Approve the plan to start building.'
         elif stage in {'build', 'review'}:
@@ -378,8 +378,6 @@ async def _revise_document(
         stage = project['stage']
         artifact_stage = {'design': 'discovery', 'plan': 'design', 'build': 'plan'}.get(stage)
         artifact_path = {'discovery': 'product.md', 'design': 'design.md', 'plan': 'plan.md'}.get(artifact_stage)
-        db.execute("UPDATE projects SET description=description || ?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                   (f"\n- {feedback[:1000]}", project_id))
         artifact = db.execute('SELECT content,version FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
                               (project_id, artifact_path)).fetchone() if artifact_path else None
         if artifact:
@@ -392,17 +390,19 @@ async def _revise_document(
                 content = result.get('document', artifact['content'])
             else:
                 content = artifact['content'] + f'\n\n## Revision direction\n{feedback}\n'
-            save_artifact(db, project_id, artifact_stage, artifact_path, content, artifact['version'])
             if artifact_stage == 'plan' and feature_enabled(FeatureFlag.APPSPEC_V1):
                 review_brief = project['brief'] + (
                     f'\n\nAdditional product direction:\n{project["description"]}' if project['description'] else ''
                 )
                 await review_appspec(db, project, provider, review_brief, feedback)
+            save_artifact(db, project_id, artifact_stage, artifact_path, content, artifact['version'])
             add_event(db, project_id, f'{artifact_path} revised from feedback', 'success')
             add_message(db, project_id, 'agent',
                         f'I’ve applied your feedback to `{artifact_path}` and carried the direction forward into the next stages.')
         else:
             add_message(db, project_id, 'agent', f'Noted. I’ll carry this direction into the next artifact: “{feedback[:240]}”')
+        db.execute("UPDATE projects SET description=description || ?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                   (f"\n- {feedback[:1000]}", project_id))
         db.execute("UPDATE projects SET status='ready',updated_at=? WHERE id=?", (now(), project_id))
 
 
@@ -479,12 +479,12 @@ async def _migrate_architecture(
         if feedback:
             reason = f'{reason} Direction: {feedback[:240]}'
         if not version:
-            db.execute('UPDATE projects SET backend_mode=?,backend_reason=?,status=?,updated_at=? WHERE id=?',
-                       (target, reason, 'ready', now(), project_id))
             if feature_enabled(FeatureFlag.APPSPEC_V1):
                 spec_project = dict(project)
                 spec_project['backend_mode'] = target
                 await review_appspec(db, spec_project, provider, brief, feedback)
+            db.execute('UPDATE projects SET backend_mode=?,backend_reason=?,status=?,updated_at=? WHERE id=?',
+                       (target, reason, 'ready', now(), project_id))
             add_event(db, project_id, f'Architecture changed to {target} before the first build', 'success')
             add_message(db, project_id, 'agent',
                         f'Architecture updated to {target}. The next build will use this foundation.', 'stage',

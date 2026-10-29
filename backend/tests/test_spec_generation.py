@@ -126,3 +126,70 @@ def test_local_refinement_uses_previous_spec_and_preserves_entity():
     assert revised.entities[0].name == 'Task'
     assert 'Keep titles concise.' in revised.product.brief
     assert revised.architecture == initial.architecture
+
+
+def test_acceptance_metadata_is_normalized_without_a_repair_call(monkeypatch):
+    document = proposal()
+    for check in document['acceptance']:
+        check['assertion'] = 'Provider-specific assertion text'
+        check['type'] = 'provider-specific type'
+    document['type'] = 'web_application'
+    calls = []
+
+    async def complete(*_args):
+        calls.append(True)
+        return document
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Metadata App', 'A compatible workflow', 'multi-file', 'fastapi',
+    ))
+    assert all(set(check.model_dump()) == {'name', 'kind', 'target'} for check in spec.acceptance)
+    assert len(calls) == 1
+
+
+def test_missing_fastapi_operations_receive_studio_defaults(monkeypatch):
+    document = proposal()
+    document['api'] = []
+
+    async def complete(*_args):
+        return document
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Incomplete App', 'An incomplete workflow', 'multi-file', 'fastapi',
+    ))
+    assert {(operation.method, operation.path) for operation in spec.api} == {
+        ('GET', '/api/health'), ('GET', '/api/items'), ('POST', '/api/items'),
+        ('PATCH', '/api/items/{item_id}'), ('DELETE', '/api/items/{item_id}'),
+    }
+
+
+def test_unsupported_acceptance_categories_fall_back_to_defaults(monkeypatch):
+    document = proposal()
+    document['acceptance'] = [{'name': 'Custom check', 'kind': 'performance', 'target': 'fast'}]
+
+    async def complete(*_args):
+        return document
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Category App', 'A categorized workflow', 'multi-file', 'fastapi',
+    ))
+    assert {check.kind for check in spec.acceptance} == {'build', 'browser', 'persistence', 'api'}
+
+
+def test_duplicate_and_custom_api_operations_are_normalized(monkeypatch):
+    document = proposal()
+    document['api'].append({'name': 'Duplicate list', 'method': 'GET', 'path': '/api/items', 'entity': 'Item'})
+    document['api'].append({'name': 'Custom auth', 'method': 'POST', 'path': '/api/auth/login'})
+
+    async def complete(*_args):
+        return document
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Duplicate App', 'A duplicate workflow', 'multi-file', 'fastapi',
+    ))
+    assert sum(operation.method == 'GET' and operation.path == '/api/items' for operation in spec.api) == 1
+    assert all(not operation.path.startswith('/api/auth') for operation in spec.api)

@@ -7,7 +7,7 @@ from ..llm import complete_with_schema
 from ..workers.contracts import WorkerRole
 from ..workers.credentials import CredentialBroker
 from .contract import entity_contract
-from .defaults import default_api, default_dependencies, default_manifest, local_default_appspec
+from .defaults import default_acceptance, default_api, default_dependencies, default_manifest, local_default_appspec
 from .schema import AppSpecError, parse_appspec
 from .types import AppSpec
 
@@ -36,6 +36,7 @@ def _normalize_proposal(
     proposal: dict, name: str, source_format: str, backend_mode: str,
 ) -> AppSpec:
     document = copy.deepcopy(proposal)
+    document.pop('type', None)
     document['schema_version'] = '1.0'
     document['compiler_version'] = '1.0'
     product = document.get('product') if isinstance(document.get('product'), dict) else {}
@@ -51,11 +52,61 @@ def _normalize_proposal(
     frontend = document.get('frontend') if isinstance(document.get('frontend'), dict) else {}
     frontend['state_adapter'] = 'forma-api' if backend_mode == 'fastapi' else 'browser-local'
     document['frontend'] = frontend
+    acceptance = document.get('acceptance')
+    if isinstance(acceptance, list):
+        normalized = []
+        for check in acceptance:
+            if not isinstance(check, dict):
+                continue
+            item = {key: check[key] for key in ('name', 'kind', 'target') if key in check}
+            if isinstance(item.get('kind'), str):
+                item['kind'] = item['kind'].lower()
+            normalized.append(item)
+        document['acceptance'] = normalized
     if backend_mode == 'static':
         document['api'] = []
         acceptance = document.get('acceptance') if isinstance(document.get('acceptance'), list) else []
         document['acceptance'] = [check for check in acceptance
                                   if isinstance(check, dict) and check.get('kind') != 'api']
+    supported = {'build', 'api', 'persistence', 'browser', 'migration', 'security'}
+    valid_checks = [check for check in document.get('acceptance', [])
+                    if isinstance(check, dict) and check.get('kind') in supported]
+    document['acceptance'] = valid_checks or default_acceptance(backend_mode, source_format)
+    if backend_mode != 'static' and isinstance(document.get('api'), list):
+        collection = 'items'
+        detail_path = ''
+        for operation in document['api']:
+            method, path = operation.get('method'), operation.get('path', '')
+            if method == 'GET' and path != '/api/health' and '{' not in path:
+                parts = path.split('/')
+                if len(parts) > 2 and parts[2]:
+                    collection = parts[2]
+                break
+        for operation in document['api']:
+            if operation.get('method') in {'PATCH', 'DELETE'} and '{' in operation.get('path', ''):
+                detail_path = operation['path']
+                break
+        entity_name = document['entities'][0]['name'] if document.get('entities') else 'Item'
+        defaults = default_api(backend_mode, collection, entity_name)
+        detail_path = detail_path or next(
+            operation['path'] for operation in defaults if operation['method'] == 'PATCH'
+        )
+        collection_path = f'/api/{collection}'
+        allowed = {
+            ('GET', '/api/health'), ('GET', collection_path), ('POST', collection_path),
+            ('PATCH', detail_path), ('DELETE', detail_path), ('GET', detail_path),
+        }
+        normalized = []
+        seen = set()
+        for operation in [*document['api'], *defaults]:
+            key = (operation.get('method'), operation.get('path'))
+            if key not in allowed or key in seen:
+                continue
+            if operation['path'] != '/api/health' and not operation.get('entity'):
+                operation['entity'] = entity_name
+            normalized.append(operation)
+            seen.add(key)
+        document['api'] = normalized
     return parse_appspec(document)
 
 
