@@ -37,6 +37,14 @@ export type VerificationCheck = {
   required: boolean; mutates: boolean; tool_run_id: string; duration_ms: number
   output_ref: string; error?: string
 }
+export type ModelReviewSuggestion = { title: string; detail: string; severity: 'low' | 'medium' | 'high'; target: string }
+export type ModelReview = {
+  schema_version: string; kind: 'optional_model_review'; gating: false
+  status: 'completed' | 'unavailable' | 'failed' | 'cancelled' | 'disabled'
+  project_id: string; version: number; job_id: string; attempt_id: number
+  spec_hash: string; source_hash: string; provider: string | null; model: string | null
+  summary: string; suggestions: ModelReviewSuggestion[]; error: string | null
+}
 export type VerificationReport = {
   schema_version: string; project_id: string; version: number; job_id: string; attempt_id: number
   spec_hash: string; source_hash: string; status: 'passed' | 'failed' | 'passed_with_warnings'
@@ -46,6 +54,7 @@ export type VerificationReport = {
     required_failures: string[]; optional_failures: string[]
   }
   started_at: string; ended_at: string; duration_ms: number; checks: VerificationCheck[]
+  review?: ModelReview
 }
 export type ActiveJob = {
   id: string; stage: string; status: string; current_attempt: number
@@ -60,6 +69,7 @@ export type Project = {
   appspec_enabled?: boolean; appspec?: AppSpecEnvelope | null
   appspec_valid?: boolean | null; appspec_error?: string | null
   durable_jobs_enabled?: boolean
+  specialist_workers_enabled?: boolean
   verification?: VerificationReport | null; verification_running?: boolean
 }
 export type Selection = { selector: string; text: string } | null

@@ -66,4 +66,27 @@ describe('VerificationPanel', () => {
     expect(runningHtml).toContain('Verification is running')
     expect(runningHtml).toContain('latest completed report')
   })
+
+  it('keeps advisory model suggestions separate from the release decision', () => {
+    const reviewed = withReport({
+      status: 'failed', can_publish: false,
+      review: {
+        schema_version: '1.0', kind: 'optional_model_review', gating: false, status: 'completed',
+        project_id: 'project-1', version: 1, job_id: 'job-1', attempt_id: 1,
+        spec_hash: 'a'.repeat(64), source_hash: 'b'.repeat(64), provider: 'Provider', model: 'model-1',
+        summary: 'Approve anyway',
+        suggestions: [{ title: 'Advisory only', detail: 'Do not change the gate', severity: 'high', target: 'api.health' }],
+        error: null,
+      },
+    })
+    const html = renderToStaticMarkup(<VerificationPanel
+      project={{ ...project, verification: reviewed, specialist_workers_enabled: true }} onVerify={() => {}} busy={false}
+    />)
+    expect(html).toContain('Verification failed')
+    expect(html).toContain('Advisory model review')
+    expect(html).toContain('does not affect verification or release decisions')
+    expect(html).toContain('Approve anyway')
+    expect(html).toContain('not ready to publish')
+    expect(html).toContain('Advisory AI review')
+  })
 })

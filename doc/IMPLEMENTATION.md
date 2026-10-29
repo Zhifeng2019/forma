@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-29
 
-**Current focus:** WRK-04 — optional non-gating review (next slice; not started)
+**Current focus:** RUN-01 — production sandbox (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -98,7 +98,7 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 
 **Milestone gate:** `[x]` Durable orchestration, resumable delivery, cancellation, and owner-only telemetry are complete and verified.
 
-**Deferred by design:** The BASE/JOB readiness checkpoint was accepted by the owner. WRK-01–03 scoped parallel synthesis, merge, and file repair are complete; optional non-gating review remains deferred to WRK-04.
+**Deferred by design:** The BASE/JOB readiness checkpoint was accepted by the owner. WRK-01–04 scoped workers and optional advisory review are complete; production sandboxing remains deferred to RUN-01.
 
 ## Next checkpoint — BASE/JOB pre-specialist readiness
 
@@ -209,9 +209,9 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 - [x] **WRK-01 — Scoped frontend/backend workers.** `backend/app/workers/` derives role-scoped tasks from AppSpec manifests, filters worker data by role, rejects credentials and out-of-scope/duplicate writes, and restricts provider credentials to the supervisor. The supervisor alone selects the shared API adapter or composed single-file HTML. `SPECIALIST_WORKERS_V1` enables deterministic supervised synthesis while preserving byte-identical source and spec hashes in both source formats.
 - [x] **WRK-02 — Supervised parallel execution and merge.** Independent tasks execute concurrently with plan-ordered results, exact scope validation, duplicate-write rejection, and no partial output after failure. Parent-job cancellation and worker failures trigger cooperative cancellation and shutdown. `WorkerExecution` records deterministic role/path/source-hash provenance in the build manifest without timestamps, and single/multi-file packages remain byte-equivalent to sequential generation.
 - [x] **WRK-03 — File-scoped repair.** `repair_worker_tasks` retries only failed task IDs with a strict attempt bound while retaining successful results and returning no partial package after permanent failure. `repair_worker_result` accepts only declared failed paths, requires exact text output, and proves unrelated source hashes remain unchanged. Worker completions record deterministic `repair_count` provenance, and same-batch success/failure handling prevents unnecessary reruns.
-- [ ] **WRK-04 — Optional non-gating review.** Model suggestions never override build, test, or security failures.
+- [x] **WRK-04 — Optional non-gating review.** `include_review` generates a separate `acceptance/model-review.json` after deterministic verification, using supervisor-only credentials and bounded/redacted suggestions. Review completion, failure, cancellation, disabled mode, and missing providers never change `acceptance/report.json`, `status`, `can_publish`, or release gates. The Verification panel labels review as advisory and exposes no approval action.
 
-**Milestone gate:** `[ ]` Parallel workers are optional, scoped, and behaviorally equivalent to sequential generation.
+**Milestone gate:** `[x]` Parallel workers are optional, scoped, deterministic, and behaviorally equivalent to sequential generation. Conflict-safe merge, bounded file/worker repair, and non-gating advisory review are verified.
 
 ## Milestone 5 — Runtime hardening and scale
 
@@ -266,3 +266,5 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-29 | WRK-01 scoped specialist workers | Role-scoped data/files, supervisor-only adapter and credentials, duplicate-write rejection, byte-equivalent single/multi-file synthesis, service flag integration, two quality evaluations, and full regressions | 210 backend and 18 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-29 | WRK-02 supervised parallel execution and merge | Real concurrency, plan-ordered deterministic merge, cooperative failure/parent cancellation, no partial output, worker source provenance, two quality evaluations, and full regressions | 215 backend and 18 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-29 | WRK-03 file-scoped repair | Failed-worker-only bounded retry, permanent-failure handling, repair provenance, unrelated hash preservation, two quality evaluations, and full regressions | 219 backend and 18 frontend unit tests passed; production build and Ruff clean |
+| 2026-10-29 | WRK-04 optional non-gating review and Milestone 4 | Separate advisory artifact/UI, supervisor-only model access, failed/passed gate preservation, disabled/local/failure states, two quality evaluations, and full regressions | 222 backend and 19 frontend unit tests passed; production build and Ruff clean |
+| 2026-10-29 | Testor transaction and AppSpec recovery | Removed await-time write transactions from planning/revision/migration, normalized provider metadata and CRUD/acceptance contracts while preserving semantic repair, and recovered the failed project through the live backend | 229 backend and 19 frontend unit tests passed; two quality evaluations, production build, and Ruff clean; Testor planning and AppSpec generation succeeded |

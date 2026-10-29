@@ -57,6 +57,7 @@ class PublishInput(BaseModel):
 class VerificationInput(BaseModel):
     version: int | None = None
     include_optional: bool = False
+    include_review: bool = False
     defer: bool = False
     selected_check_ids: list[str] | None = None
 

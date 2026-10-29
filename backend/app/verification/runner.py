@@ -9,7 +9,8 @@ import time
 from urllib.parse import quote
 
 from ..config import ROOT, Settings, settings
-from ..database import workspace_db
+from ..database import control_db, workspace_db
+from ..engine import provider_for_user
 from ..features import FeatureFlag, require_feature
 from ..frontend_builder import (
     _node_binaries, deployment_archive, ensure_frontend_build, safe_path, version_directory, write_source_files,
@@ -26,6 +27,7 @@ from ..security import create_token
 from ..spec.review import appspec_review
 from ..spec.schema import APPSPEC_PATH, COMPILER_VERSION
 from .report import build_report, check_result, report_json
+from .review import generate_model_review
 
 
 def utc_now() -> str:
@@ -330,6 +332,8 @@ async def verify_package(
     include_optional: bool = False,
     selected_check_ids: set[str] | None = None,
     config: Settings | None = None,
+    include_review: bool = False,
+    provider: dict | None = None,
 ) -> dict:
     require_feature(FeatureFlag.ACCEPTANCE_GATE_V1, config)
     context = _load_context(user_id, project_id, version)
@@ -370,9 +374,14 @@ async def verify_package(
                          (project_id, job_key)).fetchone()
     if job and job['status'] == 'cancelled':
         raise JobCancelledError('Verification was cancelled. Retry when you are ready.')
-    if outcome:
-        return outcome['report']
-    latest = latest_verification_report(user_id, job['id']) if job else None
-    if latest:
-        return latest
-    raise GenerationError('Verification is already running for this package.')
+    report = outcome.get('report')
+    if not report:
+        report = latest_verification_report(user_id, job['id']) if job else None
+    if not report:
+        raise GenerationError('Verification is already running for this package.')
+    if include_review:
+        if provider is None:
+            with control_db() as db:
+                provider = provider_for_user(db, user_id)
+        report['review'] = await generate_model_review(user_id, project_id, version, report, provider, config)
+    return report

@@ -133,11 +133,11 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
       else if (next.stage === 'build' || next.stage === 'review') setTab('preview')
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) }
   }
-  const runVerification = async (includeOptional: boolean) => {
+  const runVerification = async (includeOptional: boolean, includeReview = false) => {
     setBusy(true); setError('')
     try {
       const next = await api<Project>(`/projects/${id}/verify`, {
-        method: 'POST', body: JSON.stringify({ include_optional: includeOptional, defer: true }),
+        method: 'POST', body: JSON.stringify({ include_optional: includeOptional, include_review: includeReview, defer: true }),
       })
       setProject(next); setTab('verification')
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) }

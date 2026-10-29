@@ -8,6 +8,7 @@ from .database import control_db, workspace_db, rows
 from .deps import current_user, admin_user, owned_project
 from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput, VerificationInput, ArchitectureInput
 from .verification.runner import verify_package
+from .verification.review import latest_model_review
 from .security import hash_password, verify_password, create_token, encrypt_secret, decrypt_secret
 from .engine import add_message, add_event, generate_stage, migrate_architecture, revise_document, safe_selector
 from .llm import GenerationError
@@ -246,8 +247,15 @@ def verification_payload(user_id: int, project_id: str, version: int) -> dict:
     with workspace_db(user_id) as db:
         row = db.execute("SELECT content FROM artifacts WHERE project_id=? AND path='acceptance/report.json' AND version=?",
                          (project_id, version)).fetchone()
+    report = json.loads(row['content']) if row else None
+    if report:
+        review = latest_model_review(user_id, project_id, version)
+        if review and all(review.get(key) == report.get(key) for key in (
+            'job_id', 'attempt_id', 'spec_hash', 'source_hash',
+        )):
+            report['review'] = review
     return {
-        'verification': json.loads(row['content']) if row else None,
+        'verification': report,
         'verification_running': verification_running(user_id, project_id, version),
     }
 
@@ -271,6 +279,7 @@ def project_payload(user_id, project_id):
         result.update(appspec_review(spec['content'] if spec else None))
         result['appspec_enabled'] = feature_enabled(FeatureFlag.APPSPEC_V1)
         result['durable_jobs_enabled'] = feature_enabled(FeatureFlag.DURABLE_JOBS_V1)
+        result['specialist_workers_enabled'] = feature_enabled(FeatureFlag.SPECIALIST_WORKERS_V1)
         result.update(verification_payload(user_id, project_id, result['current_version']))
         result['active_job'] = active_job(db, project_id)
         result['published_url'] = f'/apps/{project_id}/' if result['published_version'] else None
@@ -381,11 +390,13 @@ async def verify_project(project_id: str, body: VerificationInput, user=Depends(
             schedule_verification(user['id'], project_id, version, verify_package(
                 user['id'], project_id, version, force=True,
                 include_optional=body.include_optional, selected_check_ids=selected,
+                include_review=body.include_review,
             ))
         else:
             await verify_package(
                 user['id'], project_id, version, force=True,
                 include_optional=body.include_optional, selected_check_ids=selected,
+                include_review=body.include_review,
             )
     except GenerationError as exc:
         raise HTTPException(409, str(exc)) from exc
