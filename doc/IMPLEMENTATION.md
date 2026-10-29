@@ -1,8 +1,8 @@
 # Forma Studio v1.4 — Implementation Tracker
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-30
 
-**Current focus:** RUN-01 — production sandbox (next slice; not started)
+**Current focus:** SYS-02 — shared product UI foundation (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -12,7 +12,21 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — VER-04 release gate and verification visibility
+## Latest completed increment — SYS-01 shared frontend correctness contracts
+
+- [x] **SYS-01A — Browser input adaptation.** Generated Playwright values are converted from ISO datetimes to `datetime-local`-compatible minutes without changing AppSpec field types or API payloads.
+- [x] **SYS-01B — Semantic heading contract.** Multi-file and single-file synthesis now emit one product-name `h1`, render the primary workflow as supporting text, and use a concise workspace heading; generated browser checks follow the same contract.
+- [x] **SYS-01C — Cross-product regression fixture.** An eight-field, long-name/workflow fixture covers static/FastAPI and single-file/multi-file synthesis, including a real generated static Playwright workflow.
+- [x] **SYS-01D — Verification.** Full backend/frontend regressions, quality evaluations, production build, Ruff, and an in-memory Mini-Twitter AppSpec canary pass. Existing generated applications must be rebuilt to receive the new sources and acceptance artifacts.
+
+## Planned system-wide corrective increments
+
+- [ ] **SYS-02 — Shared product UI foundation.** Presentation contracts, domain labels, responsive layouts, and complete interface states.
+- [ ] **SYS-03 — Runtime evidence and cleanup ownership.** Structured restart diagnostics, explicit version identity, and isolated cleanup outcomes.
+- [ ] **SYS-04 — Generated UI quality verification.** Responsive, accessibility, interaction-state, and screenshot evidence.
+- [ ] **SYS-05 — Product-capability honesty.** Detect unsupported briefs and expand workflow capabilities without app-specific exceptions.
+
+## Earlier completed increment — VER-04 release gate and verification visibility
 
 - [x] **VER-04A — Verification API.** Synchronous and deferred verification endpoints expose running state and persisted reports; deferred failures produce actionable project errors and agent messages.
 - [x] **VER-04B — Publish enforcement.** New publishes require fresh full-coverage verification when the gate is enabled. Idempotent republishing is allowed, and failed verification leaves the existing release online.
@@ -268,3 +282,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-29 | WRK-03 file-scoped repair | Failed-worker-only bounded retry, permanent-failure handling, repair provenance, unrelated hash preservation, two quality evaluations, and full regressions | 219 backend and 18 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-29 | WRK-04 optional non-gating review and Milestone 4 | Separate advisory artifact/UI, supervisor-only model access, failed/passed gate preservation, disabled/local/failure states, two quality evaluations, and full regressions | 222 backend and 19 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-29 | Testor transaction and AppSpec recovery | Removed await-time write transactions from planning/revision/migration, normalized provider metadata and CRUD/acceptance contracts while preserving semantic repair, and recovered the failed project through the live backend | 229 backend and 19 frontend unit tests passed; two quality evaluations, production build, and Ruff clean; Testor planning and AppSpec generation succeeded |
+| 2026-10-30 | SYS-01 shared frontend correctness contracts | Browser-only datetime adaptation, semantic product headings, eight-field cross-architecture fixture, real generated Playwright workflow, full regressions, and Mini-Twitter AppSpec canary | 239 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |

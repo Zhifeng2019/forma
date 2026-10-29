@@ -1,8 +1,24 @@
 """Generate Playwright workflow and validation checks from AppSpec."""
 
+import re
+
 from .common import (
     AcceptanceContext, GeneratedCheck, create_payload, javascript_json, required_string,
 )
+
+_DATETIME_LOCAL = re.compile(
+    r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?$'
+)
+
+
+def _browser_input_value(kind: str, value: object) -> object:
+    """Adapt an API value to its HTML control without changing the AppSpec contract."""
+    if kind != 'datetime':
+        return value
+    match = _DATETIME_LOCAL.fullmatch(str(value))
+    if not match:
+        raise ValueError(f'Invalid ISO datetime acceptance value: {value}')
+    return match.group(1)
 
 
 def generate_browser_tests(context: AcceptanceContext) -> tuple[dict[str, str], list[GeneratedCheck]]:
@@ -12,7 +28,7 @@ def generate_browser_tests(context: AcceptanceContext) -> tuple[dict[str, str], 
     if contract:
         values = create_payload(contract)
         fields = [{'name': field.name, 'kind': field.kind, 'required': field.required,
-                   'value': values[field.name]} for field in contract.fields]
+                   'value': _browser_input_value(field.kind, values[field.name])} for field in contract.fields]
     record_text = next((field['value'] for field in fields if field['kind'] in {'string', 'text'}),
                        str(fields[0]['value']) if fields else '')
     header = f'''import {{ test, expect }} from '@playwright/test'
@@ -37,7 +53,8 @@ test('primary workflow renders', async ({ page }) => {
   __PRIMARY_HEADING_CHECK__
 })
 '''.replace('__PRIMARY_HEADING_CHECK__',
-               "await expect(page.getByRole('heading', { name: PRIMARY_WORKFLOW })).toBeVisible()" if contract else '')]
+               "await expect(page.getByRole('heading', { name: PRODUCT_NAME, exact: true, level: 1 })).toBeVisible()"
+               "\n  await expect(page.getByText(PRIMARY_WORKFLOW, { exact: true })).toBeVisible()" if contract else '')]
     checks = [GeneratedCheck('browser.primary-workflow', 'browser', '/', 'primary workflow renders',
                              'acceptance/browser_tests.spec.js', environment=('APP_PREVIEW_URL',))]
     if contract:
