@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 import re
 
+from ..jobs.idempotency import canonical_input_hash
 from ..spec.types import AppSpec
 
 SHARED_API_ADAPTER = 'frontend/src/api.js'
@@ -128,3 +129,24 @@ def merge_worker_results(results: list[WorkerResult]) -> dict[str, str]:
             raise WorkerPermissionError(f'Conflicting worker writes: {conflicts}')
         merged.update(result.files)
     return merged
+
+
+def repair_worker_result(result: WorkerResult, failed_paths: tuple[str, ...], repair) -> WorkerResult:
+    """Repair only failed files and prove all unrelated source remains identical."""
+    paths = tuple(dict.fromkeys(failed_paths))
+    if not paths or not set(paths) <= set(result.task.paths):
+        raise WorkerPermissionError('Repair paths must be a non-empty subset of the worker file scope')
+    original = dict(result.files)
+    unchanged = {path: content for path, content in original.items() if path not in paths}
+    unchanged_hash = canonical_input_hash(unchanged)
+    repaired = repair(result.task, {path: original[path] for path in paths})
+    if not isinstance(repaired, dict) or set(repaired) != set(paths):
+        raise WorkerPermissionError('File repair must return exactly the failed paths')
+    if any(not isinstance(content, str) for content in repaired.values()):
+        raise WorkerPermissionError('Repaired source files must be text')
+    merged = {**original, **repaired}
+    if canonical_input_hash({path: merged[path] for path in unchanged}) != unchanged_hash:
+        raise WorkerPermissionError('File repair changed an unrelated source hash')
+    repaired_result = WorkerResult(result.task, merged)
+    validate_worker_result(repaired_result)
+    return repaired_result
