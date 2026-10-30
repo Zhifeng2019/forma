@@ -33,6 +33,11 @@ export type AppSpecEnvelope = {
   schema_version: string; compiler_version: string; spec_hash: string; spec: AppSpecDocument
 }
 export type VerificationEvidence = { path: string; kind: 'image/png'; bytes: number }
+export type CapabilityRequirement = { id: string; label: string; evidence: string; detail: string }
+export type CapabilityAssessment = {
+  schema_version: string; status: 'crud_scope' | 'limited'; summary: string
+  requirements: CapabilityRequirement[]; policy: 'single-entity-crud-v1'
+}
 export type VerificationCheck = {
   id: string; kind: string; target: string; status: 'passed' | 'failed' | 'blocked' | 'skipped'
   required: boolean; mutates: boolean; tool_run_id: string; duration_ms: number
@@ -55,7 +60,7 @@ export type VerificationReport = {
     required_failures: string[]; optional_failures: string[]
   }
   started_at: string; ended_at: string; duration_ms: number; checks: VerificationCheck[]
-  review?: ModelReview
+  review?: ModelReview; capability?: CapabilityAssessment | null
 }
 export type ActiveJob = {
   id: string; stage: string; status: string; current_attempt: number
@@ -72,5 +77,6 @@ export type Project = {
   durable_jobs_enabled?: boolean
   specialist_workers_enabled?: boolean
   verification?: VerificationReport | null; verification_running?: boolean
+  capability?: CapabilityAssessment | null
 }
 export type Selection = { selector: string; text: string } | null

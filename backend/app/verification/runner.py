@@ -26,8 +26,9 @@ from ..jobs.tool_runs import finish_tool_run, start_tool_run
 from ..llm import GenerationError
 from ..runtime import runtime_manager
 from ..security import create_token
+from ..spec.capabilities import assess_capabilities, capability_error
 from ..spec.review import appspec_review
-from ..spec.schema import APPSPEC_PATH, COMPILER_VERSION
+from ..spec.schema import APPSPEC_PATH, COMPILER_VERSION, parse_appspec
 from .report import build_report, check_result, report_json
 from .review import generate_model_review
 
@@ -79,6 +80,7 @@ def _load_context(user_id: int, project_id: str, version: int) -> dict:
         'project': dict(project), 'spec': spec, 'manifest': manifest, 'files': files,
         'backend_mode': backend_mode, 'source_format': source_format, 'checks': checks,
         'spec_hash': review['appspec']['spec_hash'], 'source_hash': source_hash,
+        'capability': assess_capabilities(parse_appspec(spec)) if spec.get('entities') else None,
     }
 
 
@@ -274,6 +276,10 @@ async def _execute_check(
             missing = [name for name in check['environment'] if not env.get(name)]
             if missing:
                 status, error = 'blocked', f'Missing required environment: {", ".join(missing)}'
+            elif check['file'] == 'studio:capability-review':
+                if context['capability'] and context['capability']['status'] == 'limited':
+                    status = 'blocked'
+                    error = capability_error(context['capability'])
             elif check['file'] == 'studio:frontend-build':
                 await _run_studio_build(user_id, project_id, version, context)
             else:
@@ -369,6 +375,7 @@ async def _run_verification(
         project_id, version, job_id, attempt_id, context['spec_hash'], context['source_hash'],
         overall_started_at, ended_at, duration_ms, results, context['complete_coverage'],
     )
+    report['capability'] = context['capability']
     report['cleanup'] = {'status': 'failed' if cleanup_errors else 'passed', 'errors': cleanup_errors}
     if cleanup_errors:
         report['can_publish'] = False

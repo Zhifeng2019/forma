@@ -102,4 +102,22 @@ describe('VerificationPanel', () => {
     expect(html).toContain('Download full log')
     expect(html).toContain('Download screenshot 1')
   })
+
+  it('explains requested capabilities outside the CRUD scaffold', () => {
+    const html = renderToStaticMarkup(<VerificationPanel project={{
+      ...project,
+      capability: {
+        schema_version: '1.0', status: 'limited', policy: 'single-entity-crud-v1',
+        summary: 'This is a limited scaffold, not the complete requested product.',
+        requirements: [{
+          id: 'authentication', label: 'Authentication and account verification', evidence: 'login',
+          detail: 'Managed identity is not implemented.',
+        }],
+      },
+    }} onVerify={() => {}} busy={false} />)
+    expect(html).toContain('Requested scope exceeds this CRUD scaffold')
+    expect(html).toContain('limited scaffold, not the complete requested product')
+    expect(html).toContain('Authentication and account verification')
+    expect(html).toContain('Managed identity is not implemented')
+  })
 })

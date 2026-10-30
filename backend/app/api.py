@@ -26,7 +26,9 @@ from .jobs.leases import request_cancellation
 from .jobs.models import JobCancelledError
 from .jobs.service import active_job, get_job
 from .jobs.usage_report import project_usage
+from .spec.capabilities import assess_capabilities
 from .spec.review import appspec_review
+from .spec.schema import parse_appspec
 from .deployment_registry import delete_deployment, upsert_deployment
 
 router = APIRouter(prefix='/api')
@@ -280,7 +282,12 @@ def project_payload(user_id, project_id):
         result['artifacts'] = rows(artifacts)
         spec = db.execute('''SELECT content FROM artifacts WHERE project_id=? AND path='appspec.json'
             ORDER BY version DESC LIMIT 1''', (project_id,)).fetchone()
-        result.update(appspec_review(spec['content'] if spec else None))
+        review = appspec_review(spec['content'] if spec else None)
+        result.update(review)
+        result['capability'] = (
+            assess_capabilities(parse_appspec(review['appspec']['spec']))
+            if review['appspec_valid'] is True and review['appspec']['spec'].get('entities') else None
+        )
         result['appspec_enabled'] = feature_enabled(FeatureFlag.APPSPEC_V1)
         result['durable_jobs_enabled'] = feature_enabled(FeatureFlag.DURABLE_JOBS_V1)
         result['specialist_workers_enabled'] = feature_enabled(FeatureFlag.SPECIALIST_WORKERS_V1)

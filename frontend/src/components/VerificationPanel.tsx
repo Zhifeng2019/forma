@@ -48,10 +48,12 @@ export function VerificationPanel({ project, onVerify, busy }: {
   project: Project; onVerify: (includeOptional: boolean, includeReview?: boolean) => void; busy: boolean
 }) {
   const report = project.verification
+  const capability = report?.capability || project.capability
   const running = Boolean(project.verification_running)
   const canRun = Boolean(project.current_version && project.appspec && project.appspec_valid !== false && !busy)
   return <div className="verification-view">
     <header className="verification-heading"><div><span className="eyebrow">DETERMINISTIC VERIFICATION</span><h2>Evidence before release.</h2><p>Results come from builds, API calls, browser checks, and security inspection—not model review.</p></div><div className="verification-actions"><button className="button secondary" disabled={!canRun} onClick={() => onVerify(false)}>{busy ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}Verify application</button><button className="button ghost" disabled={!canRun} onClick={() => onVerify(true)} title="Also run migration and republishing checks on this application">Include migration checks</button>{project.specialist_workers_enabled && <button className="button ghost" disabled={!canRun} onClick={() => onVerify(false, true)} title="Generate optional model suggestions. This does not affect the release decision."><Sparkles size={14} />Advisory AI review</button>}</div></header>
+    {capability?.status === 'limited' && <section className="capability-warning" role="alert"><strong>Requested scope exceeds this CRUD scaffold</strong><p>{capability.summary}</p><ul>{capability.requirements.map(item => <li key={item.id}><strong>{item.label}</strong><span>{item.detail}</span></li>)}</ul></section>}
     {!project.appspec && <div className="empty-state"><span><ShieldCheck size={27} /></span><h3>AppSpec is required for verification</h3><p>Enable AppSpec and build a version to generate a typed contract and acceptance checks.</p></div>}
     {running && <div className="verification-running" aria-live="polite"><LoaderCircle className="spin" size={17} /><div><strong>Verification is running</strong><p>Build, runtime, browser, and security checks are executing. You can review the latest completed report below.</p></div></div>}
     {!report && !running && project.appspec && <div className="empty-state"><span><ShieldCheck size={27} /></span><h3>No verification report yet</h3><p>Run deterministic verification to evaluate this application before publishing.</p></div>}

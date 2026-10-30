@@ -36,7 +36,7 @@ def test_acceptance_generation_is_deterministic_and_provenance_complete():
     assert first == second
     assert set(first) == {
         'acceptance/api_tests.py', 'acceptance/browser_tests.spec.js',
-        'acceptance/security_tests.py', 'acceptance/migration_tests.py', 'acceptance/manifest.json',
+        'acceptance/security_tests.py', 'acceptance/migration_tests.py', 'acceptance/capabilities.json', 'acceptance/manifest.json',
         'acceptance/playwright.config.ts',
     }
     document = manifest(first)
@@ -48,7 +48,7 @@ def test_acceptance_generation_is_deterministic_and_provenance_complete():
         'build.production', 'api.health', 'api.crud', 'api.required-validation', 'persistence.restart',
         'browser.primary-workflow', 'browser.required-fields', 'browser.create-refresh-delete',
         'browser.validation-feedback', 'browser.accessibility', 'browser.responsive-layout',
-        'browser.interaction-states', 'security.no-embedded-credentials',
+        'browser.interaction-states', 'capability.declared-scope', 'security.no-embedded-credentials',
         'security.no-host-environment-access', 'security.reviewed-dependencies',
         'security.no-external-frontend-urls', 'security.archive-exclusions',
         'migration.preserves-phase-and-publication', 'migration.republish-preserves-history',
@@ -138,7 +138,7 @@ def test_spec_artifacts_include_acceptance_without_changing_build_inputs():
     assert set(artifacts) == {
         'appspec.json', 'build-manifest.json', 'acceptance/api_tests.py',
         'acceptance/browser_tests.spec.js', 'acceptance/security_tests.py',
-        'acceptance/migration_tests.py', 'acceptance/manifest.json', 'acceptance/playwright.config.ts',
+        'acceptance/migration_tests.py', 'acceptance/capabilities.json', 'acceptance/manifest.json', 'acceptance/playwright.config.ts',
     }
     assert _digest(package.files) == _digest({**package.files, **artifacts})
 
