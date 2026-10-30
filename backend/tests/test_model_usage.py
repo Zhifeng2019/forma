@@ -173,7 +173,7 @@ def test_output_repair_records_finish_reason_tokens_and_cost_per_request(monkeyp
     with workspace_db(user_id) as db:
         rows = db.execute('SELECT * FROM usage_ledger WHERE job_id=? ORDER BY rowid', (job_id,)).fetchall()
     assert len(rows) == 2
-    assert [json.loads(row['metadata'])['request_reason'] for row in rows] == ['initial', 'output_repair']
+    assert [json.loads(row['metadata'])['request_reason'] for row in rows] == ['initial', 'output_continuation']
     assert json.loads(rows[1]['metadata'])['reason_detail'] == 'truncated by the output token limit'
     assert [row['finish_reason'] for row in rows] == ['length', 'stop']
     assert [row['estimated_cost'] for row in rows] == [0.00005, 0.00011]

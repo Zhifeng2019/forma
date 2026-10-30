@@ -12,17 +12,53 @@ class GenerationError(RuntimeError):
     pass
 
 
+def _escape_json_control_characters(text: str) -> str:
+    """Escape literal control characters inside JSON strings without changing other content."""
+    output = []
+    in_string = False
+    escaped = False
+    for character in text:
+        if escaped:
+            output.append(character)
+            escaped = False
+            continue
+        if character == '\\':
+            output.append(character)
+            escaped = True
+            continue
+        if character == '"':
+            in_string = not in_string
+            output.append(character)
+            continue
+        if in_string and ord(character) < 0x20:
+            escapes = {'\n': '\\n', '\r': '\\r', '\t': '\\t'}
+            output.append(escapes.get(character, f'\\u{ord(character):04x}'))
+        else:
+            output.append(character)
+    return ''.join(output)
+
+
+def _json_loads(text: str):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        sanitized = _escape_json_control_characters(text)
+        if sanitized == text:
+            raise
+        return json.loads(sanitized)
+
+
 def parse_json(text: str) -> dict:
     text = text.strip()
     text = re.sub(r'^```(?:json)?\s*|\s*```$', '', text)
     try:
-        value = json.loads(text)
+        value = _json_loads(text)
     except json.JSONDecodeError as exc:
         start, end = text.find('{'), text.rfind('}')
         if start < 0 or end <= start:
             raise GenerationError('The model did not return a valid structured result.') from exc
         try:
-            value = json.loads(text[start:end + 1])
+            value = _json_loads(text[start:end + 1])
         except json.JSONDecodeError as inner:
             raise GenerationError('The model response could not be parsed. Please retry.') from inner
     if not isinstance(value, dict):
@@ -128,6 +164,8 @@ async def _complete(
             request_sequence = 0
             request_reason = 'initial'
             reason_detail = None
+            continuation = False
+            continuation_source = ''
             while attempt <= OUTPUT_REPAIR_ATTEMPTS:
                 response, tool_run = await _post_with_cancellation(client, url, {
                     'headers': {'Authorization': f'Bearer {decrypt_secret(provider["api_key_encrypted"])}'},
@@ -164,10 +202,18 @@ async def _complete(
                 if not choices:
                     raise GenerationError('The provider returned an empty response.')
                 choice = choices[0]
-                content = str(choice.get('message', {}).get('content') or '').strip()
+                fragment = str(choice.get('message', {}).get('content') or '').strip()
+                content = continuation_source + fragment if continuation else fragment
                 finish_reason = str(choice.get('finish_reason') or '')
                 if finish_reason != 'length':
                     try:
+                        if continuation:
+                            try:
+                                if current_job_context():
+                                    current_job_context().raise_if_cancelled()
+                                return parse_json(fragment)
+                            except GenerationError:
+                                pass
                         if current_job_context():
                             current_job_context().raise_if_cancelled()
                         return parse_json(content)
@@ -179,17 +225,34 @@ async def _complete(
                         f'The model reached the {MAX_OUTPUT_TOKENS:,}-token output limit twice. '
                         'Try splitting the application into a smaller first phase.'
                     )
-                reason = 'truncated by the output token limit' if finish_reason == 'length' else 'invalid JSON'
-                messages = [
-                    *messages,
-                    {'role': 'assistant', 'content': content[:64_000]},
-                    {'role': 'user', 'content': (
-                        f'The previous response was {reason}. Return the complete result again '
-                        'as one valid JSON object. Keep the implementation concise enough to fit '
-                        'the output budget. Do not add commentary or Markdown fences.'
-                    )},
-                ]
-                request_reason = 'output_repair'
+                if finish_reason == 'length':
+                    reason = 'truncated by the output token limit'
+                    continuation_source = content
+                    messages = [
+                        *messages,
+                        {'role': 'assistant', 'content': content},
+                        {'role': 'user', 'content': (
+                            'The previous response stopped because it reached the output token limit. '
+                            'Continue exactly from its final character. Output only the remaining text; '
+                            'do not repeat or restart the JSON, and do not add commentary or Markdown fences.'
+                        )},
+                    ]
+                    request_reason = 'output_continuation'
+                    continuation = True
+                else:
+                    reason = 'invalid JSON'
+                    messages = [
+                        *messages,
+                        {'role': 'assistant', 'content': content[:64_000]},
+                        {'role': 'user', 'content': (
+                            'The previous response was invalid JSON. Return the complete result again '
+                            'as one valid JSON object. Keep the implementation concise enough to fit '
+                            'the output budget. Do not add commentary or Markdown fences.'
+                        )},
+                    ]
+                    request_reason = 'output_repair'
+                    continuation = False
+                    continuation_source = ''
                 reason_detail = reason
                 attempt += 1
         raise GenerationError('The model did not return a usable structured response.')

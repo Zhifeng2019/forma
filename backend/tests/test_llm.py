@@ -59,7 +59,7 @@ async def test_truncated_output_is_retried_with_bounded_budget(monkeypatch):
     assert first['max_tokens'] == 32_768
     assert first['thinking'] == {'type': 'disabled'}
     repair = FakeClient.calls[1]['json']['messages'][-1]['content']
-    assert 'truncated by the output token limit' in repair
+    assert 'Continue exactly from its final character' in repair
 
 
 @pytest.mark.asyncio
@@ -121,3 +121,42 @@ async def test_json_schema_falls_back_for_compatible_providers(monkeypatch):
     assert len(FakeClient.calls) == 2
     assert FakeClient.calls[0]['json']['response_format']['type'] == 'json_schema'
     assert FakeClient.calls[1]['json']['response_format'] == {'type': 'json_object'}
+
+
+@pytest.mark.asyncio
+async def test_length_response_is_continued_and_reassembled(monkeypatch):
+    FakeClient.responses = [
+        FakeResponse('{"document":"# Design\\n\\n## Users', 'length'),
+        FakeResponse('\\n\\n## Workflow\\n\\nDetails"}'),
+    ]
+    FakeClient.calls = []
+    monkeypatch.setattr(httpx, 'AsyncClient', FakeClient)
+    provider = {
+        'name': 'DeepSeek', 'model': 'deepseek-chat',
+        'base_url': 'https://api.deepseek.com/v1',
+        'api_key_encrypted': encrypt_secret('not-a-real-key'),
+    }
+
+    result = await llm.complete(provider, 'Write a design', 'Return the document')
+
+    assert result == {'document': '# Design\n\n## Users\n\n## Workflow\n\nDetails'}
+    continuation = FakeClient.calls[1]['json']['messages'][-1]['content']
+    assert 'Continue exactly from its final character' in continuation
+    assert 'do not repeat or restart the JSON' in continuation
+
+
+@pytest.mark.asyncio
+async def test_literal_newlines_inside_document_json_are_normalized(monkeypatch):
+    FakeClient.responses = [FakeResponse('{"document":"# Design\n\n## Users\nRegister and sign in."}')]
+    FakeClient.calls = []
+    monkeypatch.setattr(httpx, 'AsyncClient', FakeClient)
+    provider = {
+        'name': 'DeepSeek', 'model': 'deepseek-chat',
+        'base_url': 'https://api.deepseek.com/v1',
+        'api_key_encrypted': encrypt_secret('not-a-real-key'),
+    }
+
+    result = await llm.complete(provider, 'Write a design', 'Return the document')
+
+    assert result == {'document': '# Design\n\n## Users\nRegister and sign in.'}
+    assert len(FakeClient.calls) == 1

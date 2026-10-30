@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-30
 
-**Current focus:** SYS-01–SYS-05 complete — owner review and application rebuild validation
+**Current focus:** Owner retry of Mini-Twitter design generation
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -12,7 +12,14 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — SYS-05 product-capability honesty
+## Latest completed increment — LLM continuation and document-JSON robustness
+
+- [x] **Provider evidence.** The Mini-Twitter design failure used `stop`, not the output-token limit, and reached the JSON repair attempt; truncation and malformed document JSON require separate handling.
+- [x] **Bounded continuation.** A true `length` response now receives one continuation request, preserves the full assistant fragment, and parses either a continuation or a complete replacement JSON before failing.
+- [x] **Document parsing.** Literal control characters inside JSON strings are escaped deterministically, covering Markdown documents with raw newlines while preserving the existing single invalid-JSON repair.
+- [x] **Verification.** Fragment reassembly, literal-newline parsing, usage accounting, schema fallback, cancellation, full backend regressions, and generation-quality evaluations pass.
+
+## Earlier completed increment — SYS-05 product-capability honesty
 
 - [x] **SYS-05A — Deterministic scope assessment.** Product briefs, workflows, and acceptance goals are compared with the current single-entity CRUD compiler using explicit capability rules rather than model self-approval.
 - [x] **SYS-05B — Required capability gate.** Ordinary CRUD passes, while known exceeded-scope applications build as limited scaffolds but cannot be published as complete products; legacy manifests remain compatible.
@@ -318,3 +325,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-30 | SYS-03 runtime evidence and cleanup ownership | Bounded full redacted diagnostics, owner-only log access, versioned restart, transient-race retries, isolated cleanup outcomes, and cancellation/snapshot fault coverage | 249 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |
 | 2026-10-30 | SYS-04 generated UI quality verification | Accessibility and keyboard checks, three responsive viewports, interaction-state coverage, screenshot evidence, owner-only downloads, and real single-file/Vite verification | 251 backend and 20 frontend unit tests passed with 1 sandbox integration skipped; eight screenshots per static Phase 2 run, two quality evaluations, production build, and Ruff clean |
 | 2026-10-30 | SYS-05 product-capability honesty | Deterministic scope assessment, required capability gate, early limitation visibility, actionable UI warnings, full regressions, and Mini-Twitter capability canary | 255 backend and 21 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |
+| 2026-10-30 | LLM continuation and document-JSON robustness | Added bounded continuation for `length` responses, fragment reassembly, literal-newline JSON normalization, and usage/repair regressions | 257 backend tests passed with 1 sandbox integration skipped; two quality evaluations and Ruff clean |
