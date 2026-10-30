@@ -1,8 +1,0 @@
-{
-  "name": "Partial package overlay",
-  "backend_mode": "static",
-  "source_format": "multi-file",
-  "files": {
-    "frontend/src/components/Workspace.jsx": "export default function Workspace() { return <main><h1>Updated workspace</h1></main> }"
-  }
-}

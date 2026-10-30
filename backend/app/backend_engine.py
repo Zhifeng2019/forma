@@ -116,7 +116,7 @@ Requirements:
 
 def has_forma_api(script: str) -> bool:
     """Accept Forma.api or a native fetch handled by the runtime bridge."""
-    return bool(re.search(r'(?:window\.)?Forma(?:\?\.|\.)api(?:\?\.)?\s*\(', script)
+    return bool(re.search(r'(?:window\.)?Forma(?:\?\.|\.)api(?:\?\.)?\s*(?:<[^()]*>\s*)?\(', script)
                 or re.search(r'Forma\[["\']api["\']\]\s*\(', script)
                 or re.search(r'\bfetch\s*\(', script))
 

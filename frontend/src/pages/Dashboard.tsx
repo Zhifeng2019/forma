@@ -22,8 +22,7 @@ export function Dashboard({ user, onUser }: { user: User; onUser: (user: User | 
   const [name, setName] = useState('')
   const [brief, setBrief] = useState('')
   const [auto, setAuto] = useState(false)
-  const [backend, setBackend] = useState<BackendMode>('auto')
-  const [sourceFormat, setSourceFormat] = useState<Project['source_format']>('multi-file')
+  const [backend, setBackend] = useState<BackendMode>('fastapi')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const navigate = useNavigate()
@@ -34,7 +33,7 @@ export function Dashboard({ user, onUser }: { user: User; onUser: (user: User | 
   }, [])
   const createProject = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError('')
-    try { const project = await api<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, brief, auto_mode: auto, backend_mode: backend, source_format: sourceFormat, defer: true }) }); navigate(`/projects/${project.id}`) }
+    try { const project = await api<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, brief, auto_mode: auto, backend_mode: backend, source_format: 'multi-file', defer: true }) }); navigate(`/projects/${project.id}`) }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setBusy(false) }
   }
   const choose = (example: typeof examples[0]) => { setName(example.title); setBrief(example.text); setCreate(true) }
@@ -55,14 +54,10 @@ export function Dashboard({ user, onUser }: { user: User; onUser: (user: User | 
       <label>Application name<input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Northstar client portal" required minLength={2} autoFocus /></label>
       <label>Tell us about your idea<textarea value={brief} onChange={e => setBrief(e.target.value)} placeholder="Who is it for? What problem does it solve? What should people be able to do?" required minLength={12} rows={6} /><small>{brief.length} characters · A few sentences is plenty</small></label>
       <div className="idea-tip"><Lightbulb size={17} /><span>Tip: include your primary users and the one action they should be able to complete.</span></div>
-      <fieldset className="architecture-picker" disabled={busy}><legend>Application architecture</legend><p>Not every app needs a server. Pick the simplest foundation that fits your idea.</p><div className="architecture-options">
-        <label className={backend === 'auto' ? 'selected' : ''}><input type="radio" name="backend" value="auto" checked={backend === 'auto'} onChange={() => setBackend('auto')} /><Sparkles size={18} /><strong>Let Forma decide</strong><small>Recommended · Choose from the product brief</small>{backend === 'auto' && <Check className="architecture-check" size={13} />}</label>
-        <label className={backend === 'static' ? 'selected' : ''}><input type="radio" name="backend" value="static" checked={backend === 'static'} onChange={() => setBackend('static')} /><Code2 size={18} /><strong>Frontend only</strong><small>Portable HTML with browser-side state</small>{backend === 'static' && <Check className="architecture-check" size={13} />}</label>
-        <label className={backend === 'fastapi' ? 'selected' : ''}><input type="radio" name="backend" value="fastapi" checked={backend === 'fastapi'} onChange={() => setBackend('fastapi')} /><Server size={18} /><strong>FastAPI backend</strong><small>A dedicated Python API and runtime</small>{backend === 'fastapi' && <Check className="architecture-check" size={13} />}</label>
-      </div></fieldset>
-      <fieldset className="architecture-picker" disabled={busy}><legend>Project format</legend><p>Choose a deployable source package or the original single-file format.</p><div className="source-format-options">
-        <label className={sourceFormat === 'multi-file' ? 'selected' : ''}><input type="radio" name="source_format" value="multi-file" checked={sourceFormat === 'multi-file'} onChange={() => setSourceFormat('multi-file')} /><strong>Project package</strong><small>Multi-file React, production build, and deployment download</small></label>
-        <label className={sourceFormat === 'single-file' ? 'selected' : ''}><input type="radio" name="source_format" value="single-file" checked={sourceFormat === 'single-file'} onChange={() => setSourceFormat('single-file')} /><strong>Single file</strong><small>Portable HTML with an optional FastAPI module</small></label>
+      <fieldset className="architecture-picker" disabled={busy}><legend>Application architecture</legend><p>Every app is a React + TypeScript project. Choose whether it gets its own API and database.</p><div className="architecture-options">
+        <label className={backend === 'fastapi' ? 'selected' : ''}><input type="radio" name="backend" value="fastapi" checked={backend === 'fastapi'} onChange={() => setBackend('fastapi')} /><Server size={18} /><strong>FastAPI + SQLite</strong><small>Recommended · A Python API with a real database</small>{backend === 'fastapi' && <Check className="architecture-check" size={13} />}</label>
+        <label className={backend === 'auto' ? 'selected' : ''}><input type="radio" name="backend" value="auto" checked={backend === 'auto'} onChange={() => setBackend('auto')} /><Sparkles size={18} /><strong>Let Forma decide</strong><small>Choose from the product brief</small>{backend === 'auto' && <Check className="architecture-check" size={13} />}</label>
+        <label className={backend === 'static' ? 'selected' : ''}><input type="radio" name="backend" value="static" checked={backend === 'static'} onChange={() => setBackend('static')} /><Code2 size={18} /><strong>Frontend only</strong><small>React app with browser-side storage</small>{backend === 'static' && <Check className="architecture-check" size={13} />}</label>
       </div></fieldset>
       <label className="toggle-row"><span><strong>Autopilot mode</strong><small>Move through stages without approval gates</small></span><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /><i /></label>
       {error && <div className="form-error">{error}</div>}

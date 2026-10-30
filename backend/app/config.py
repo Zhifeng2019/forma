@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -22,9 +23,6 @@ class Settings(BaseSettings):
     runtime_idle_seconds: int = 1800
     runtime_max_processes: int = 8
     durable_jobs_v1: bool = False
-    appspec_v1: bool = False
-    acceptance_gate_v1: bool = False
-    specialist_workers_v1: bool = False
     sandbox_v1: bool = False
 
     @property
@@ -40,6 +38,25 @@ class Settings(BaseSettings):
         (path / 'users').mkdir(exist_ok=True)
         (path / 'projects').mkdir(exist_ok=True)
         return path
+
+
+# Package installers may need the host's proxy and CA settings. Only these variables are passed
+# through, and only to npm/pip installation steps, never to generated application processes.
+INSTALLER_NETWORK_VARIABLES = (
+    'HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy',
+    'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE', 'PIP_CERT', 'NODE_EXTRA_CA_CERTS', 'NPM_CONFIG_CAFILE',
+)
+
+
+def installer_network_environment() -> dict[str, str]:
+    return {name: os.environ[name] for name in INSTALLER_NETWORK_VARIABLES if os.environ.get(name)}
+
+
+def installer_ca_bundle() -> str | None:
+    for name in ('PIP_CERT', 'REQUESTS_CA_BUNDLE', 'SSL_CERT_FILE'):
+        if os.environ.get(name):
+            return os.environ[name]
+    return None
 
 
 settings = Settings()

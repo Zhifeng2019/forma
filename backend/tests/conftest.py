@@ -15,9 +15,6 @@ os.environ['RUNTIME_PYTHON'] = sys.executable
 # Host rollouts may enable v1.4 features. Every suite starts from legacy
 # defaults; opt-in tests enable flags explicitly with monkeypatch.
 os.environ['DURABLE_JOBS_V1'] = 'false'
-os.environ['APPSPEC_V1'] = 'false'
-os.environ['ACCEPTANCE_GATE_V1'] = 'false'
-os.environ['SPECIALIST_WORKERS_V1'] = 'false'
 os.environ['SANDBOX_V1'] = 'false'
 
 

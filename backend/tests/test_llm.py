@@ -4,9 +4,8 @@ import pytest
 
 from app import llm
 from app.security import encrypt_secret
-from fixtures.loader import FixturePack
-
-PACK = FixturePack()
+TRUNCATED_OUTPUT = '{"name":"Truncated application","files":{"index.html":"<!doctype html><html>'
+INVALID_JSON = 'This is not a JSON object and cannot be parsed.'
 
 
 class FakeResponse:
@@ -40,7 +39,7 @@ class FakeClient:
 @pytest.mark.asyncio
 async def test_truncated_output_is_retried_with_bounded_budget(monkeypatch):
     FakeClient.responses = [
-        FakeResponse(PACK.read_resource(PACK.manifest.providers['truncated-model-output']), 'length'),
+        FakeResponse(TRUNCATED_OUTPUT, 'length'),
         FakeResponse(json.dumps({'html': '<!doctype html><html></html>'})),
     ]
     FakeClient.calls = []
@@ -65,7 +64,7 @@ async def test_truncated_output_is_retried_with_bounded_budget(monkeypatch):
 @pytest.mark.asyncio
 async def test_invalid_json_gets_one_repair_attempt(monkeypatch):
     FakeClient.responses = [
-        FakeResponse(PACK.read_resource(PACK.manifest.providers['invalid-json'])),
+        FakeResponse(INVALID_JSON),
         FakeResponse('{"document":"repaired"}'),
     ]
     FakeClient.calls = []

@@ -1,4 +1,3 @@
-import json
 import subprocess
 import time
 import pytest
@@ -46,9 +45,7 @@ def test_architecture_recommendation_and_source_policy():
 
 
 def test_legacy_requirements_gain_email_support_once():
-    from fixtures.loader import FixturePack
-    pack = FixturePack()
-    legacy = json.loads(pack.read_resource(pack.manifest.providers['missing-requirements']))['files']['requirements.txt']
+    legacy = 'fastapi==0.139.0\n'
     enriched = runtime_requirements(legacy)
     assert enriched.count('email-validator==') == 1
     assert runtime_requirements(enriched) == enriched
@@ -63,6 +60,7 @@ def test_fastapi_preview_crud_publish_and_cleanup():
     with TestClient(app) as client:
         token = register(client, 'backend@example.com')
         response = client.post('/api/projects', headers=auth(token), json={
+            'source_format': 'single-file',
             'name': 'Shared Priorities',
             'brief': 'A shared team workspace with a database for priorities and live progress.',
             'backend_mode': 'auto', 'auto_mode': False,
@@ -152,6 +150,7 @@ def test_architecture_migration_preserves_history_and_published_version():
     with TestClient(app) as client:
         token = register(client, 'migration@example.com')
         response = client.post('/api/projects', headers=auth(token), json={
+            'source_format': 'single-file',
             'name': 'Migration Workspace', 'brief': 'A personal planning workspace that may later need shared data.',
             'backend_mode': 'static', 'auto_mode': False,
         })
@@ -213,6 +212,7 @@ def test_deferred_architecture_migration_returns_working_then_updates():
     with TestClient(app) as client:
         token = register(client, 'deferred-migration@example.com')
         response = client.post('/api/projects', headers=auth(token), json={
+            'source_format': 'single-file',
             'name': 'Deferred Migration', 'brief': 'A personal workspace ready for a later shared API.',
             'backend_mode': 'static', 'auto_mode': False,
         })

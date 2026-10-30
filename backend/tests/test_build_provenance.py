@@ -8,10 +8,10 @@ from app.jobs.context import reset_job_context
 from app.jobs.leases import lease_next_job
 from app.jobs.service import create_job
 from app.runtime import ManagedRuntime, runtime_manager
-from app.spec.compiler import compile_package
-from app.spec.defaults import local_default_appspec
+from app.jobs.idempotency import canonical_input_hash
+from app.source_packages import local_source_package
+from test_event_replay import make_project
 from test_tool_runs import activate
-from test_verification_runner import dummy_check, verification_project
 
 
 def project_attempt(user_id, project_id):
@@ -23,17 +23,15 @@ def project_attempt(user_id, project_id):
 
 def test_frontend_build_staging_promotion_and_cache_provenance():
     user_id = 960400
-    project_id = verification_project(user_id, [dummy_check()])
+    project_id = make_project(user_id)
     job_id, attempt = project_attempt(user_id, project_id)
-    package = compile_package(local_default_appspec(
-        'Verifier App', 'Exercise deterministic verification.', 'multi-file', 'static',
-    ))
+    files = local_source_package('Provenance App', 'Exercise build provenance.', 1, 'static')
 
     async def scenario():
         token = activate(user_id, project_id, job_id, attempt)
         try:
-            first = await ensure_frontend_build(user_id, project_id, 1, package.files, 'spec-fixture')
-            second = await ensure_frontend_build(user_id, project_id, 1, package.files, 'spec-fixture')
+            first = await ensure_frontend_build(user_id, project_id, 1, files, 'spec-fixture')
+            second = await ensure_frontend_build(user_id, project_id, 1, files, 'spec-fixture')
             assert first == second
             await ensure_node_environment(user_id)
         finally:
@@ -51,7 +49,7 @@ def test_frontend_build_staging_promotion_and_cache_provenance():
         for row in by_name[name]:
             provenance = json.loads(row['provenance'])
             assert row['status'] == 'succeeded' and provenance['spec_hash'] == 'spec-fixture'
-            assert provenance['source_hash'] == package.source_hash
+            assert provenance['source_hash'] == canonical_input_hash(files)
             assert provenance['package_hash'] and provenance['build_digest']
             assert provenance['vite_version'] and provenance['duration_ms'] >= 0
     assert json.loads(by_name['frontend.build'][0]['provenance'])['cache_hit'] is True
@@ -65,7 +63,7 @@ def test_frontend_build_staging_promotion_and_cache_provenance():
 
 def test_runtime_reuse_records_cache_source_spec_and_package():
     user_id = 960401
-    project_id = verification_project(user_id, [dummy_check()])
+    project_id = make_project(user_id)
     job_id, attempt = project_attempt(user_id, project_id)
 
     class Process:

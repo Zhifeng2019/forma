@@ -1,8 +1,0 @@
-{
-  "name": "Invalid package",
-  "backend_mode": "static",
-  "source_format": "multi-file",
-  "files": {
-    "frontend/src/App.jsx": "export default function App() { return <h1>Incomplete</h1> }"
-  }
-}

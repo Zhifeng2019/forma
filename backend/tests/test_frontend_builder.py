@@ -71,7 +71,7 @@ def test_failed_build_preserves_last_usable_version(monkeypatch):
     with pytest.raises(PackageBuildError, match='Deliberate build failure'):
         asyncio.run(ensure_frontend_build(940101, project_id, 1, files))
     assert (dist / 'index.html').read_text() == 'last usable version'
-    assert not (root / 'frontend' / 'src' / 'App.jsx').exists()
+    assert not (root / 'frontend' / 'src' / 'App.tsx').exists()
     assert not staging_directory(project_id, 1).exists()
 
 
@@ -82,12 +82,12 @@ def test_incomplete_attempt_is_promoted_only_after_success(monkeypatch):
     project_id = uuid.uuid4().hex
     files = local_source_package('Recovery Check', 'Complete failed directory', 1, 'static')
     root = version_directory(project_id, 1)
-    workspace = root / 'frontend' / 'src' / 'components' / 'Workspace.jsx'
+    workspace = root / 'frontend' / 'src' / 'components' / 'Workspace.tsx'
     workspace.parent.mkdir(parents=True)
-    workspace.write_text(files['frontend/src/components/Workspace.jsx'])
+    workspace.write_text(files['frontend/src/components/Workspace.tsx'])
     asyncio.run(ensure_frontend_build(940102, project_id, 1, files))
-    assert (root / 'frontend' / 'src' / 'App.jsx').is_file()
-    assert (root / 'frontend' / 'src' / 'components' / 'Workspace.jsx').read_text() == files['frontend/src/components/Workspace.jsx']
+    assert (root / 'frontend' / 'src' / 'App.tsx').is_file()
+    assert (root / 'frontend' / 'src' / 'components' / 'Workspace.tsx').read_text() == files['frontend/src/components/Workspace.tsx']
     assert (root / 'frontend' / 'dist' / 'index.html').is_file()
     assert not staging_directory(project_id, 1).exists()
 
@@ -97,7 +97,7 @@ def test_changed_source_is_rejected_without_starting_a_build(monkeypatch):
     project_id = uuid.uuid4().hex
     files = local_source_package('Immutable Check', 'Do not overwrite changed source', 1, 'static')
     root = version_directory(project_id, 1)
-    app = root / 'frontend' / 'src' / 'App.jsx'
+    app = root / 'frontend' / 'src' / 'App.tsx'
     app.parent.mkdir(parents=True)
     app.write_text('locally changed source')
     calls = []

@@ -17,7 +17,7 @@ import sys
 import time
 
 from .backend_engine import runtime_requirements
-from .config import settings
+from .config import installer_ca_bundle, installer_network_environment, settings
 from .engine import validate_project_id
 from .features import FeatureFlag, feature_enabled
 from .frontend_builder import PackageBuildError, write_source_files
@@ -208,14 +208,16 @@ class RuntimeManager:
             )
             if not matches:
                 installed = True
+                certificate = installer_ca_bundle()
                 try:
                     await self._run_install(
                         [str(python), '-m', 'pip', '--isolated', 'install',
                          '--index-url', settings.runtime_pip_index_url,
+                         *(['--cert', certificate] if certificate else []),
                          '--disable-pip-version-check', '--no-input', '--force-reinstall',
                          '-r', str(requirements_file)],
                         'install the application dependencies into its virtual environment',
-                        env, work, timeout=settings.runtime_install_timeout, telemetry=step('dependency-install'),
+                        {**env, **installer_network_environment()}, work, timeout=settings.runtime_install_timeout, telemetry=step('dependency-install'),
                     )
                 except RuntimeLaunchError as exc:
                     raise RuntimeLaunchError(f'{exc} Dependency check: {dependency_detail}') from exc

@@ -12,11 +12,6 @@ from .frontend_builder import ensure_frontend_build
 from .source_packages import local_source_package, package_prompt, validate_source_package
 from .features import FeatureFlag, feature_enabled
 from .jobs.runner import run_generation_job
-from .spec.contract import entity_contract
-from .spec.generator import propose_appspec
-from .spec.legacy_adapter import legacy_appspec
-from .spec.schema import APPSPEC_PATH, SPEC_ARTIFACT_PATHS, appspec_document, parse_appspec
-from .spec.service import compile_legacy_package, generate_appspec_package, spec_artifacts
 
 STAGES = ['discovery', 'design', 'plan', 'build', 'review', 'deploy']
 STAGE_LABELS = {
@@ -49,42 +44,56 @@ def get_project(db, project_id):
     return db.execute('SELECT * FROM projects WHERE id=?', (project_id,)).fetchone()
 
 
+DOCUMENT_PATHS = ('product.md', 'design.md', 'plan.md')
+# Product documents (stored at version 0) and older version metadata are not application source.
+NON_SOURCE_PATHS = (*DOCUMENT_PATHS, 'appspec.json', 'build-manifest.json')
+
+
 def generation_source_files(db, project_id: str, version: int) -> dict[str, str]:
+    placeholders = ','.join('?' * len(NON_SOURCE_PATHS))
     return {row['path']: row['content'] for row in db.execute(
-        "SELECT path,content FROM artifacts WHERE project_id=? AND version=? AND path NOT IN (?,?) AND path NOT LIKE 'acceptance/%'",
-        (project_id, version, *SPEC_ARTIFACT_PATHS),
+        f"SELECT path,content FROM artifacts WHERE project_id=? AND version=? AND path NOT IN ({placeholders}) "
+        "AND path NOT LIKE 'acceptance/%'",
+        (project_id, version, *NON_SOURCE_PATHS),
     )}
 
 
-def generation_appspec(db, project, version: int):
-    if version < 0:
-        return None
-    row = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?',
-                     (project['id'], APPSPEC_PATH, version)).fetchone()
-    if row:
-        return json.loads(row['content'])
-    files = generation_source_files(db, project['id'], version)
-    if not files:
-        return None
-    return legacy_appspec(project, files).model_dump(mode='json', exclude_none=True)
+def latest_document(db, project_id: str, path: str) -> str:
+    row = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
+                     (project_id, path)).fetchone()
+    return row['content'] if row else ''
 
 
-async def review_appspec(db, project, provider, brief: str, feedback: str = ''):
-    spec = parse_appspec(await propose_appspec(
-        provider, project['name'], brief, project['source_format'], project['backend_mode'],
-        phase=1, feedback=feedback, current_spec=generation_appspec(db, project, 0),
-    ))
-    entity_contract(spec)
-    save_artifact(db, project['id'], 'plan', APPSPEC_PATH, appspec_document(spec), 0)
-    add_event(db, project['id'], 'AppSpec draft is ready for contract review')
-    return spec
+def phase_plan(plan: str, phase: int) -> str:
+    """Return the plan section for one phase, or the whole plan when it cannot be located."""
+    headings = list(re.finditer(r'(?im)^#{1,4}[^\n]*\bphase\s*(\d)\b[^\n]*$', plan))
+    for index, match in enumerate(headings):
+        if int(match.group(1)) == phase:
+            end = headings[index + 1].start() if index + 1 < len(headings) else len(plan)
+            return plan[match.start():end].strip()
+    return plan
 
 
-def compile_with_appspec(project, files: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
-    if not feature_enabled(FeatureFlag.APPSPEC_V1):
-        return files, {}
-    compiled = compile_legacy_package(project, files)
-    return compiled.files, spec_artifacts(compiled)
+def product_context(db, project_id: str, phase: int | None = None, limit: int = 6000) -> str:
+    """The approved upstream artifacts that every later stage builds on."""
+    sections = []
+    product = latest_document(db, project_id, 'product.md')
+    if product:
+        sections.append(f'## Approved product description (product.md)\n{product[:limit]}')
+    design = latest_document(db, project_id, 'design.md')
+    if design:
+        sections.append(f'## Approved experience and technical design (design.md)\n{design[:limit]}')
+    plan = latest_document(db, project_id, 'plan.md')
+    if plan:
+        if phase:
+            sections.append(f'## Implementation plan for phase {phase} (plan.md)\n{phase_plan(plan, phase)[:limit]}')
+        else:
+            sections.append(f'## Approved implementation plan (plan.md)\n{plan[:limit]}')
+    return '\n\n'.join(sections)
+
+
+def with_context(brief: str, context: str) -> str:
+    return f'{brief}\n\n{context}' if context else brief
 
 
 def provider_for_user(control, user_id):
@@ -221,7 +230,7 @@ async def _advance(
             content = design_document(name, backend_mode, project['backend_reason'])
             if provider:
                 result = await complete(provider, 'You are a staff product designer and architect.',
-                    f'Product: {name}\nBrief: {brief}\nSelected architecture: {backend_mode}\nArchitecture reason: {project["backend_reason"]}\nReturn {{"document":"markdown..."}} covering visual direction, UX, information architecture, frontend and the selected backend architecture. Do not change the architecture. For FastAPI apps, document the /api contract and the Forma.api frontend bridge.')
+                    f'Product: {name}\nBrief: {brief}\n\n{product_context(db, project_id)}\n\nSelected architecture: {backend_mode}\nArchitecture reason: {project["backend_reason"]}\nReturn {{"document":"markdown..."}} grounded in the approved product description, covering visual direction, UX, information architecture, frontend and the selected backend architecture. Do not change the architecture. For FastAPI apps, document the /api contract and the Forma.api frontend bridge.')
                 content = result.get('document', content)
             save_artifact(db, project_id, 'design', 'design.md', content, 0)
             next_stage, index = 'plan', 2
@@ -231,10 +240,8 @@ async def _advance(
             content = plan_document(name, backend_mode)
             if provider:
                 result = await complete(provider, 'You are a pragmatic technical lead.',
-                    f'Product: {name}\nBrief: {brief}\nSelected architecture: {backend_mode}\nReturn {{"document":"markdown..."}} with exactly three implementation phases. Each phase must end in a shareable working page. For FastAPI apps, evolve the frontend and Python API together and include health and persistence checks.')
+                    f'Product: {name}\nBrief: {brief}\n\n{product_context(db, project_id)}\n\nSelected architecture: {backend_mode}\nReturn {{"document":"markdown..."}} with exactly three implementation phases headed `## Phase 1`, `## Phase 2` and `## Phase 3`. Derive the phases from the approved product scope and design; name the screens, data, and API routes each phase delivers. Each phase must end in a shareable working page. For FastAPI apps, evolve the frontend and Python API together and include health and persistence checks.')
                 content = result.get('document', content)
-            if feature_enabled(FeatureFlag.APPSPEC_V1):
-                await review_appspec(db, project, provider, brief)
             save_artifact(db, project_id, 'plan', 'plan.md', content, 0)
             next_stage, index = 'build', 3
             message = 'The implementation is split into three shareable phases. Approve the plan to start building.'
@@ -244,19 +251,13 @@ async def _advance(
             version += 1
             backend_mode = project['backend_mode']
             source_format = project['source_format']
-            appspec_enabled = feature_enabled(FeatureFlag.APPSPEC_V1)
-            if appspec_enabled:
-                compiled = await generate_appspec_package(
-                    project, provider, phase, feedback,
-                    generation_appspec(db, project, version - 1), brief=brief,
-                )
-                files, provenance = compiled.files, spec_artifacts(compiled)
-            elif source_format == 'multi-file':
+            build_brief = with_context(brief, product_context(db, project_id, phase))
+            if source_format == 'multi-file':
                 current_files = generation_source_files(db, project_id, version - 1)
                 if provider:
-                    files = await complete_package(provider, name, brief, phase, feedback, backend_mode, current_files)
+                    files = await complete_package(provider, name, build_brief, phase, feedback, backend_mode, current_files)
                 else:
-                    files = local_source_package(name, brief, phase, backend_mode)
+                    files = local_source_package(name, brief, phase, backend_mode, current_files)
             elif backend_mode == 'fastapi':
                 current = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
                                      (project_id, 'index.html')).fetchone()
@@ -266,7 +267,7 @@ async def _advance(
                     result = await complete(
                         provider,
                         'You are an expert full-stack engineer. Build a polished single-file HTML frontend and a focused, secure FastAPI backend as one coherent application.',
-                        application_prompt(name, brief, phase, feedback,
+                        application_prompt(name, build_brief, phase, feedback,
                                            current['content'] if current else '',
                                            current_backend['content'] if current_backend else ''),
                     )
@@ -283,23 +284,19 @@ async def _advance(
                     current = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? ORDER BY version DESC LIMIT 1',
                                          (project_id, 'index.html')).fetchone()
                     result = await complete(provider, 'You are an expert frontend engineer. Return a complete, polished, responsive single-file HTML application. No external dependencies or backend. Include accessible semantic markup and working JavaScript.',
-                        f'Product: {name}\nBrief: {brief}\nImplementation phase: {phase}/3\nFeedback: {feedback}\nCurrent HTML to improve: {current["content"] if current else "None"}\nReturn {{"html":"<!doctype html>..."}}.')
+                        f'Product: {name}\nBrief: {build_brief}\nImplementation phase: {phase}/3\nFeedback: {feedback}\nCurrent HTML to improve: {current["content"] if current else "None"}\nReturn {{"html":"<!doctype html>..."}}.')
                     html = result.get('html', '')
                     if '<html' not in html.lower() or '</html>' not in html.lower():
                         raise GenerationError('The generated application was not a complete HTML document.')
                 else:
                     html = application_html(name, brief, phase, feedback)
-            if source_format == 'single-file' and not appspec_enabled:
+            if source_format == 'single-file':
                 files = {'index.html': html}
                 if backend_mode == 'fastapi':
                     files.update({BACKEND_PATH: python_source, REQUIREMENTS_PATH: requirements})
-            if not appspec_enabled:
-                files, provenance = compile_with_appspec(project, files)
             if source_format == 'multi-file':
                 await ensure_frontend_build(db_user, project_id, version, files)
             for path, content in files.items():
-                save_artifact(db, project_id, 'build', path, content, version)
-            for path, content in provenance.items():
                 save_artifact(db, project_id, 'build', path, content, version)
             version_label = 'Refinement' if revise or stage == 'review' else f'Phase {phase}'
             db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',
@@ -390,11 +387,6 @@ async def _revise_document(
                 content = result.get('document', artifact['content'])
             else:
                 content = artifact['content'] + f'\n\n## Revision direction\n{feedback}\n'
-            if artifact_stage == 'plan' and feature_enabled(FeatureFlag.APPSPEC_V1):
-                review_brief = project['brief'] + (
-                    f'\n\nAdditional product direction:\n{project["description"]}' if project['description'] else ''
-                )
-                await review_appspec(db, project, provider, review_brief, feedback)
             save_artifact(db, project_id, artifact_stage, artifact_path, content, artifact['version'])
             add_event(db, project_id, f'{artifact_path} revised from feedback', 'success')
             add_message(db, project_id, 'agent',
@@ -479,10 +471,6 @@ async def _migrate_architecture(
         if feedback:
             reason = f'{reason} Direction: {feedback[:240]}'
         if not version:
-            if feature_enabled(FeatureFlag.APPSPEC_V1):
-                spec_project = dict(project)
-                spec_project['backend_mode'] = target
-                await review_appspec(db, spec_project, provider, brief, feedback)
             db.execute('UPDATE projects SET backend_mode=?,backend_reason=?,status=?,updated_at=? WHERE id=?',
                        (target, reason, 'ready', now(), project_id))
             add_event(db, project_id, f'Architecture changed to {target} before the first build', 'success')
@@ -505,16 +493,7 @@ async def _migrate_architecture(
         next_version = version + 1
         direction = (f'Architecture migration to {target}. Preserve the current visual design and working interactions. '
                      f'User direction: {feedback or "None"}')
-        spec_project = dict(project)
-        spec_project['backend_mode'] = target
-        appspec_enabled = feature_enabled(FeatureFlag.APPSPEC_V1)
-        if appspec_enabled:
-            compiled = await generate_appspec_package(
-                spec_project, provider, phase, feedback, generation_appspec(db, project, version),
-                brief=f'{brief}\n\n{direction}',
-            )
-            files, provenance = compiled.files, spec_artifacts(compiled)
-        elif target == 'fastapi':
+        if target == 'fastapi':
             direction += (' Replace browser-owned shared state with the new FastAPI service. Keep the existing '
                           'frontend recognizable while adding a complete API and Forma.api integration.')
             if provider:
@@ -550,14 +529,10 @@ async def _migrate_architecture(
                     raise GenerationError('The frontend-only migration still contains backend calls. Please retry.')
             else:
                 html = application_html(name, brief, phase, direction)
-        if not appspec_enabled:
-            files = {'index.html': html}
-            if target == 'fastapi':
-                files.update({BACKEND_PATH: python_source, REQUIREMENTS_PATH: requirements})
-            files, provenance = compile_with_appspec(spec_project, files)
+        files = {'index.html': html}
+        if target == 'fastapi':
+            files.update({BACKEND_PATH: python_source, REQUIREMENTS_PATH: requirements})
         for path, content in files.items():
-            save_artifact(db, project_id, 'build', path, content, next_version)
-        for path, content in provenance.items():
             save_artifact(db, project_id, 'build', path, content, next_version)
         label = 'FastAPI migration' if target == 'fastapi' else 'Frontend-only migration'
         db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',
@@ -579,27 +554,17 @@ async def _migrate_source_package(
         next_version = version + 1
         direction = (f'Architecture migration to {target}. Preserve the current React design and interactions. '
                      f'User direction: {feedback or "None"}')
-        spec_project = dict(project)
-        spec_project['backend_mode'] = target
-        if feature_enabled(FeatureFlag.APPSPEC_V1):
-            compiled = await generate_appspec_package(
-                spec_project, provider, max(1, project['phase_index']), feedback,
-                generation_appspec(db, project, version), brief=f'{project["brief"]}\n\n{direction}',
+        current_files = generation_source_files(db, project_id, version)
+        phase = max(1, project['phase_index'])
+        if provider:
+            files = await complete_package(
+                provider, project['name'], with_context(project['brief'], product_context(db, project_id, phase)),
+                phase, direction, target, current_files,
             )
-            files, provenance = compiled.files, spec_artifacts(compiled)
         else:
-            current_files = generation_source_files(db, project_id, version)
-            if provider:
-                files = await complete_package(
-                    provider, project['name'], project['brief'], max(1, project['phase_index']), direction, target, current_files,
-                )
-            else:
-                files = local_source_package(project['name'], project['brief'], max(1, project['phase_index']), target)
-            files, provenance = compile_with_appspec(spec_project, files)
+            files = local_source_package(project['name'], project['brief'], phase, target, current_files)
         await ensure_frontend_build(user_id, project_id, next_version, files)
         for path, content in files.items():
-            save_artifact(db, project_id, 'build', path, content, next_version)
-        for path, content in provenance.items():
             save_artifact(db, project_id, 'build', path, content, next_version)
         label = 'FastAPI migration' if target == 'fastapi' else 'Frontend-only migration'
         db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',

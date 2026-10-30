@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { studioPython } from './python.mjs'
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const backendRoot = path.resolve(frontendRoot, '../backend')
 const backendUrl = process.env.FORMA_BACKEND_URL || 'http://127.0.0.1:8000'
 const backendPort = new URL(backendUrl).port || '8000'
-const python = process.env.PYTHON || '/Users/zhifengzhang/python_env/env_ai_build/bin/python'
+const python = studioPython(backendRoot)
 let backend
 
 try {

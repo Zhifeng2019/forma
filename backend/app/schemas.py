@@ -34,8 +34,9 @@ class ProjectInput(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     brief: str = Field(min_length=12, max_length=12000)
     auto_mode: bool = False
-    backend_mode: Literal['auto', 'static', 'fastapi'] = 'auto'
-    source_format: Literal['single-file', 'multi-file'] = 'single-file'
+    backend_mode: Literal['auto', 'static', 'fastapi'] = 'fastapi'
+    # Single-file HTML remains available to API clients for older workflows.
+    source_format: Literal['single-file', 'multi-file'] = 'multi-file'
     defer: bool = False
 
 
@@ -52,14 +53,6 @@ class StageInput(BaseModel):
 
 class PublishInput(BaseModel):
     version: int | None = None
-
-
-class VerificationInput(BaseModel):
-    version: int | None = None
-    include_optional: bool = False
-    include_review: bool = False
-    defer: bool = False
-    selected_check_ids: list[str] | None = None
 
 
 class ArchitectureInput(BaseModel):

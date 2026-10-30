@@ -8,12 +8,13 @@ from pathlib import Path, PurePosixPath
 import shutil
 import zipfile
 
-from .config import settings
+from .config import installer_network_environment, settings
 from .jobs.idempotency import canonical_input_hash
 from .jobs.processes import executable_version, run_process
 from .jobs.tool_runs import finish_tool_run, start_tool_run
 from .source_packages import frontend_dependencies, frontend_package_json, frontend_vite_config
-from .spec.schema import SPEC_ARTIFACT_PATHS
+# Version metadata stored beside source artifacts; never part of a build.
+NON_SOURCE_PATHS = ('appspec.json', 'build-manifest.json')
 
 
 class PackageBuildError(RuntimeError):
@@ -83,7 +84,7 @@ def _promote_version(staging: Path, root: Path) -> None:
 
 def _source_files(files: dict[str, str]) -> dict[str, str]:
     return {path: content for path, content in files.items()
-            if path not in SPEC_ARTIFACT_PATHS and not path.startswith('acceptance/')}
+            if path not in NON_SOURCE_PATHS and not path.startswith('acceptance/')}
 
 
 def _source_hash(files: dict[str, str]) -> str:
@@ -167,7 +168,7 @@ async def ensure_node_environment(user_id: int) -> Path:
             )
         root.mkdir(parents=True, exist_ok=True)
         (root / 'package.json').write_text(package_json)
-        env = _environment(root, root / 'node_modules', node)
+        env = {**_environment(root, root / 'node_modules', node), **installer_network_environment()}
         await _run(
             [npm, 'install', '--ignore-scripts', '--no-audit', '--no-fund'],
             root, env, settings.runtime_build_timeout, 'Reviewed npm dependency installation',

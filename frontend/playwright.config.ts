@@ -1,4 +1,6 @@
+import path from 'node:path'
 import { defineConfig } from '@playwright/test'
+import { studioPython } from './scripts/python.mjs'
 
 const backendPort = Number(process.env.FORMA_TEST_BACKEND_PORT || 8000)
 const frontendPort = Number(process.env.FORMA_TEST_FRONTEND_PORT || 5173)
@@ -15,7 +17,7 @@ export default defineConfig({
   use: { baseURL: frontendUrl, viewport: { width: 1440, height: 1000 }, trace: 'retain-on-failure' },
   webServer: [
     {
-      command: `/Users/zhifengzhang/python_env/env_ai_build/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port ${backendPort}`,
+      command: `${studioPython(path.resolve('../backend'))} -m uvicorn app.main:app --host 127.0.0.1 --port ${backendPort}`,
       cwd: '../backend', url: `${backendUrl}/api/health`, reuseExistingServer, timeout: 30_000,
     },
     {

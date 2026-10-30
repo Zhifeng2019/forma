@@ -1,8 +1,0 @@
-{
-  "name": "Fixture Item Manager",
-  "backend_mode": "static",
-  "source_format": "single-file",
-  "files": {
-    "index.html": "<!doctype html><html><body><main><h1>Fixture Item Manager</h1></main></body></html>"
-  }
-}

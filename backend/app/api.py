@@ -1,14 +1,11 @@
 import asyncio
-import json
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 import httpx
 from .database import control_db, workspace_db, rows
 from .deps import current_user, admin_user, owned_project
-from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput, VerificationInput, ArchitectureInput
-from .verification.runner import verify_package
-from .verification.review import latest_model_review
+from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput, ArchitectureInput
 from .security import hash_password, verify_password, create_token, encrypt_secret, decrypt_secret
 from .engine import add_message, add_event, generate_stage, migrate_architecture, revise_document, safe_selector
 from .llm import GenerationError
@@ -19,10 +16,8 @@ from .frontend_builder import PackageBuildError, deployment_archive, ensure_fron
 from .features import FeatureFlag, feature_enabled
 from .jobs.events import follow_frames, high_watermark, replay_events, replay_frames
 from .jobs.leases import request_cancellation
-from .jobs.models import JobCancelledError
 from .jobs.service import active_job, get_job
 from .jobs.usage_report import project_usage
-from .spec.review import appspec_review
 from .deployment_registry import delete_deployment, upsert_deployment
 
 router = APIRouter(prefix='/api')
@@ -50,39 +45,8 @@ def schedule_generation(user_id: int, project_id: str, coroutine) -> asyncio.Tas
     return task
 
 
-_verification_jobs: dict[asyncio.Task, tuple[int, str, int]] = {}
-
-
-def schedule_verification(user_id: int, project_id: str, version: int, coroutine) -> asyncio.Task:
-    task = asyncio.create_task(coroutine)
-    _verification_jobs[task] = (user_id, project_id, version)
-
-    def finish(done: asyncio.Task) -> None:
-        job = _verification_jobs.pop(done, None)
-        if not job or done.cancelled():
-            return
-        exception = done.exception()
-        if exception:
-            with workspace_db(job[0]) as db:
-                project = db.execute('SELECT status FROM projects WHERE id=?', (job[1],)).fetchone()
-                if project:
-                    db.execute("UPDATE projects SET status='error',updated_at=CURRENT_TIMESTAMP WHERE id=?", (job[1],))
-                    add_event(db, job[1], f'Background verification failed: {exception}', 'error')
-                    add_message(db, job[1], 'agent', f'I hit a problem during verification: {exception}', 'error')
-
-    task.add_done_callback(finish)
-    return task
-
-
-def verification_running(user_id: int, project_id: str, version: int) -> bool:
-    return any(
-        job_user == user_id and job_project == project_id and job_version == version and not task.done()
-        for task, (job_user, job_project, job_version) in _verification_jobs.items()
-    )
-
-
 async def cancel_generation_jobs() -> None:
-    jobs = list(_generation_jobs.items()) + list(_verification_jobs.items())
+    jobs = list(_generation_jobs.items())
     for task, _job in jobs:
         task.cancel()
     if jobs:
@@ -243,23 +207,6 @@ def update_preferences(body: PreferenceInput, user=Depends(current_user)):
     return body.model_dump()
 
 
-def verification_payload(user_id: int, project_id: str, version: int) -> dict:
-    with workspace_db(user_id) as db:
-        row = db.execute("SELECT content FROM artifacts WHERE project_id=? AND path='acceptance/report.json' AND version=?",
-                         (project_id, version)).fetchone()
-    report = json.loads(row['content']) if row else None
-    if report:
-        review = latest_model_review(user_id, project_id, version)
-        if review and all(review.get(key) == report.get(key) for key in (
-            'job_id', 'attempt_id', 'spec_hash', 'source_hash',
-        )):
-            report['review'] = review
-    return {
-        'verification': report,
-        'verification_running': verification_running(user_id, project_id, version),
-    }
-
-
 def project_payload(user_id, project_id):
     with workspace_db(user_id) as db:
         project = db.execute('SELECT * FROM projects WHERE id=?', (project_id,)).fetchone()
@@ -274,13 +221,7 @@ def project_payload(user_id, project_id):
         artifacts = db.execute('''SELECT a.* FROM artifacts a JOIN (SELECT path,MAX(version) version FROM artifacts WHERE project_id=? GROUP BY path) latest
                                   ON a.path=latest.path AND a.version=latest.version WHERE a.project_id=? ORDER BY a.path''', (project_id, project_id))
         result['artifacts'] = rows(artifacts)
-        spec = db.execute('''SELECT content FROM artifacts WHERE project_id=? AND path='appspec.json'
-            ORDER BY version DESC LIMIT 1''', (project_id,)).fetchone()
-        result.update(appspec_review(spec['content'] if spec else None))
-        result['appspec_enabled'] = feature_enabled(FeatureFlag.APPSPEC_V1)
         result['durable_jobs_enabled'] = feature_enabled(FeatureFlag.DURABLE_JOBS_V1)
-        result['specialist_workers_enabled'] = feature_enabled(FeatureFlag.SPECIALIST_WORKERS_V1)
-        result.update(verification_payload(user_id, project_id, result['current_version']))
         result['active_job'] = active_job(db, project_id)
         result['published_url'] = f'/apps/{project_id}/' if result['published_version'] else None
         return result
@@ -367,42 +308,6 @@ def usage_report(project_id: str, user=Depends(current_user)):
     return project_usage(user['id'], project_id)
 
 
-@router.get('/projects/{project_id}/verification')
-def get_verification(project_id: str, version: int | None = None, user=Depends(current_user)):
-    project = owned_project(user['id'], project_id)
-    payload = verification_payload(user['id'], project_id, version or project['current_version'])
-    return {'report': payload['verification'], 'running': payload['verification_running']}
-
-
-@router.post('/projects/{project_id}/verify')
-async def verify_project(project_id: str, body: VerificationInput, user=Depends(current_user)):
-    project = owned_project(user['id'], project_id)
-    if not feature_enabled(FeatureFlag.ACCEPTANCE_GATE_V1):
-        raise HTTPException(409, 'Acceptance verification is not enabled on this studio')
-    if project['status'] == 'working':
-        raise HTTPException(409, 'Wait for generation to finish before verifying')
-    version = body.version or project['current_version']
-    if not version:
-        raise HTTPException(409, 'Build an application before verifying')
-    selected = set(body.selected_check_ids) if body.selected_check_ids is not None else None
-    try:
-        if body.defer:
-            schedule_verification(user['id'], project_id, version, verify_package(
-                user['id'], project_id, version, force=True,
-                include_optional=body.include_optional, selected_check_ids=selected,
-                include_review=body.include_review,
-            ))
-        else:
-            await verify_package(
-                user['id'], project_id, version, force=True,
-                include_optional=body.include_optional, selected_check_ids=selected,
-                include_review=body.include_review,
-            )
-    except GenerationError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    return project_payload(user['id'], project_id)
-
-
 @router.post('/projects/{project_id}/jobs/{job_id}/cancel')
 def cancel_project_job(project_id: str, job_id: str, user=Depends(current_user)):
     owned_project(user['id'], project_id)
@@ -438,13 +343,6 @@ async def advance_project(project_id: str, body: StageInput, user=Depends(curren
         raise HTTPException(409, 'The agent is already working')
     if project['stage'] == 'deploy':
         return project_payload(user['id'], project_id)
-    if feature_enabled(FeatureFlag.APPSPEC_V1) and project['stage'] == 'build' and not project['current_version']:
-        with workspace_db(user['id']) as db:
-            spec = db.execute('''SELECT content FROM artifacts WHERE project_id=? AND path='appspec.json'
-                ORDER BY version DESC LIMIT 1''', (project_id,)).fetchone()
-        review = appspec_review(spec['content'] if spec else None, for_compilation=True)
-        if review['appspec_valid'] is False:
-            raise HTTPException(409, f'AppSpec requires correction before building: {review["appspec_error"]}')
     with control_db() as db:
         from .engine import provider_for_user
         provider = provider_for_user(db, user['id'])
@@ -470,10 +368,7 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
         provider = provider_for_user(db, user['id'])
 
     async def run_message() -> None:
-        builds_application = project['stage'] in {'build', 'review'} and (
-            project['current_version'] > 0 or not feature_enabled(FeatureFlag.APPSPEC_V1)
-        )
-        if builds_application:
+        if project['stage'] in {'build', 'review'}:
             await generate_stage(user['id'], project_id, provider, body.content + selection, revise=True)
         else:
             await revise_document(user['id'], project_id, provider, body.content)
@@ -634,16 +529,6 @@ async def publish_project(project_id: str, body: PublishInput, user=Depends(curr
     version = body.version or project['current_version']
     if not version:
         raise HTTPException(409, 'Build at least one version before publishing')
-    if feature_enabled(FeatureFlag.ACCEPTANCE_GATE_V1) and project['published_version'] != version:
-        try:
-            report = await verify_package(user['id'], project_id, version, force=True)
-        except JobCancelledError as exc:
-            raise HTTPException(409, 'Verification was cancelled. The existing release is unchanged.') from exc
-        except GenerationError as exc:
-            raise HTTPException(409, f'Verification could not be completed: {exc}') from exc
-        if not report['can_publish']:
-            failures = report['summary']['required_failures']
-            raise HTTPException(409, f'Verification failed: {", ".join(failures) or "required checks"}')
     if version_backend_mode(user['id'], project_id, version) == 'fastapi':
         runtime_artifacts(user['id'], project_id, version)
     with workspace_db(user['id']) as db:

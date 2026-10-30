@@ -1,7 +1,7 @@
 # Forma Studio — AI-Native Application Builder
 
-**Document status:** Updated to reflect the implemented multi-file package release
-**Current release:** Forma Studio v1.3
+**Document status:** Updated after the 2026-10-30 course correction (see IMPLEMENTATION.md)
+**Current release:** Forma Studio v1.5
 **Product name:** *Forma* comes from the Latin word for form, shape, or structure. It represents turning an unstructured idea into a working product.
 
 ## 1. Product overview
@@ -20,15 +20,15 @@ The product is built around a visible development cycle rather than a single pro
 - Support multiple production LLM providers through administrator configuration.
 - Isolate each user’s projects and artifacts in a dedicated SQLite workspace.
 
-### v1.3 scope
+### v1.5 scope
 
-New projects can use a multi-file React and FastAPI source package or the legacy single-file format. Project package is the default in the creation UI; Single file remains available and existing versions keep their original behavior. Both formats support frontend-only and FastAPI architectures and preserve the same six-stage workflow.
+Forma is for people without programming skills. Every new project is a deployable source package: a **React + TypeScript** frontend and, by default, a **FastAPI + SQLite** backend. The model writes the application from the approved product, design, and plan documents; the studio validates, builds, runs, and publishes it. A frontend-only React + TypeScript app (browser storage) is an explicit alternative. Earlier single-file HTML and JavaScript (`.jsx`) versions keep their original behavior.
 
-Each multi-file version has this deployment layout:
+Each version has this deployment layout:
 
 ```text
 versions/vN/
-  frontend/        # React source, package.json, Vite config, and built dist/
+  frontend/        # React + TypeScript source, package.json, tsconfig.json, Vite config, built dist/
   backend/         # FastAPI entrypoint, app package modules, requirements.txt
 ```
 
@@ -109,13 +109,22 @@ The agent converts the user’s initial brief into `product.md`, covering:
 - First-release scope.
 - Success criteria.
 
-At creation, the user selects **Let Forma decide**, **Frontend only**, or **FastAPI backend**. The default is Let Forma decide. During discovery, an external provider returns a backend recommendation alongside the document; Forma Local uses brief-based architecture rules. Explicit user selection takes precedence. The selected architecture and reason are recorded in project activity and carried into later stages. Existing pre-v1.1 projects remain frontend-only after migration.
+At creation, the user selects **FastAPI + SQLite**, **Let Forma decide**, or **Frontend only**. The default is FastAPI + SQLite. During discovery, an external provider returns a backend recommendation alongside the document; Forma Local uses brief-based architecture rules. Explicit user selection takes precedence. The selected architecture and reason are recorded in project activity and carried into later stages. Existing pre-v1.1 projects remain frontend-only after migration.
 
 The user can submit feedback to revise the document or approve it to continue.
 
+### Stage continuity
+
+Each stage is generated from the approved output of the stages before it, not only from the original brief:
+
+- `design.md` is written from `product.md`.
+- `plan.md` is written from `product.md` and `design.md`, with phases headed `## Phase 1`, `## Phase 2`, `## Phase 3`.
+- Each build phase receives `product.md`, `design.md`, and that phase's section of `plan.md`, plus the current package source.
+- Document feedback revises the artifact, which then feeds every later stage.
+
 ### 4.2 Experience and technical design
 
-The agent creates `design.md`, covering:
+The agent creates `design.md` from the approved product description, covering:
 
 - Visual direction and design system.
 - Information architecture.
@@ -136,7 +145,7 @@ The default phase structure is:
 
 ### 4.4 Phased implementation
 
-The agent implements one phase at a time and creates a new application version after each phase or revision. A frontend-only version contains `index.html`. A FastAPI version contains a matched `index.html`, `backend/main.py`, and `backend/requirements.txt`.
+The agent implements one phase at a time and creates a new application version after each phase or revision. A version contains the React + TypeScript `frontend/` package and, for FastAPI projects, the matching `backend/` package with `main.py`, `app/` modules, and pinned `requirements.txt`. Legacy single-file versions contain `index.html` (plus `backend/main.py` and `backend/requirements.txt` for FastAPI).
 
 The builder provides:
 
@@ -217,7 +226,7 @@ Each user selects an available provider in the Configuration page. If no provide
 - FastAPI application calls return complete HTML and Python source in one structured result so the UI and API contract evolve together.
 - Single-file frontend output must contain a complete `<html>` document. Backend output must parse as Python, define `app = FastAPI(...)`, expose `/api/health`, and use either `Forma.api` or same-origin `/api/...` fetch calls handled by the runtime bridge.
 - Multi-file output uses a `files` object with required React and backend paths plus `python_dependencies`. The studio supplies reviewed `package.json` and Vite config, validates every path and module, and requires a production build before saving the ready version. `backend/requirements.txt` is generated by Forma from the reviewed list and is not required from the model. Optional-chaining and native-fetch adapters are supported by the same runtime bridge.
-- Generated backend imports are allowlisted. Base packages are FastAPI, Pydantic, Uvicorn, and email-validator; reviewed optional packages are httpx, PyJWT, cryptography, pydantic-settings, python-multipart, and SQLAlchemy. JavaScript application imports are limited to React, React DOM, and Lucide. All dependency pins come from studio lockfiles or verified versions rather than arbitrary model-selected versions.
+- Generated backend imports are allowlisted. Base packages are FastAPI, Pydantic, Uvicorn, and email-validator; reviewed optional packages are httpx, PyJWT, cryptography, pydantic-settings, python-multipart, and SQLAlchemy. Frontend imports are limited to React, React DOM, and Lucide. New packages are strict TypeScript; the studio supplies `tsconfig.json`, `vite.config.ts`, and `src/forma.d.ts`, which types the global `Forma.api<T>(path, options)` bridge. All dependency pins come from studio lockfiles or verified versions rather than arbitrary model-selected versions.
 - The explicit output-token budget is **32,768 tokens** for each structured call.
 - DeepSeek deterministic coding calls disable reasoning where supported.
 - Moonshot Kimi K3 calls use low reasoning effort.
@@ -321,11 +330,12 @@ The optional-backend release is accepted when:
 
 ## 10. Planned next iterations
 
-The following capabilities are not part of the v1.3 runtime:
+The following capabilities are not part of the v1.5 runtime:
 
 - Hardened container sandboxing with enforced CPU, memory, network, and syscall policies for untrusted multi-tenant execution.
 - Managed product-level authentication, authorization, storage, and separate preview/published application databases.
-- Specialist-agent delegation for parallel frontend, backend, and verification work.
-- Streaming model output and resumable background generation jobs.
-- Provider usage quotas, token accounting, and cost reporting.
+- Type-checking generated packages (`tsc --noEmit`) with errors fed into bounded repair.
+- Generated API tests for each application, run before release review.
+- Streaming model output.
+- Provider usage quotas.
 - Custom domains and production edge routing.

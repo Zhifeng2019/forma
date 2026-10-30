@@ -20,6 +20,7 @@ def test_complete_product_lifecycle():
     account = register('maker@example.com')
     token = account['token']
     response = client.post('/api/projects', headers=auth(token), json={
+        'source_format': 'single-file', 'backend_mode': 'auto',
         'name': 'Client Compass',
         'brief': 'A client portal for a small consultancy to track project progress and next actions.',
         'auto_mode': False,
@@ -96,6 +97,7 @@ def test_admin_provider_and_user_controls():
 def test_autopilot_reaches_review_without_manual_gates():
     account = register('auto@example.com')
     response = client.post('/api/projects', headers=auth(account['token']), json={
+        'source_format': 'single-file', 'backend_mode': 'auto',
         'name': 'Autopilot App', 'brief': 'A simple focused application for tracking weekly creative work.',
         'auto_mode': True,
     })
@@ -112,6 +114,7 @@ def test_deferred_autopilot_reaches_review_in_the_background():
         })
         token = response.json()['token']
         response = live.post('/api/projects', headers=auth(token), json={
+            'source_format': 'single-file',
             'name': 'Live Autopilot', 'brief': 'A personal focus timer with a weekly overview and local browser state.',
             'auto_mode': True, 'backend_mode': 'static', 'defer': True,
         })
@@ -132,6 +135,7 @@ def test_deferred_autopilot_reaches_review_in_the_background():
 def test_feedback_refines_current_phase_without_advancing():
     account = register('feedback@example.com')
     response = client.post('/api/projects', headers=auth(account['token']), json={
+        'source_format': 'single-file',
         'name': 'Phase Feedback', 'brief': 'A personal reading list with notes and a calm weekly overview.',
         'backend_mode': 'static', 'auto_mode': False,
     })
@@ -169,6 +173,7 @@ def test_deferred_document_build_and_feedback_actions_update_in_background():
         })
         token = response.json()['token']
         response = live.post('/api/projects', headers=auth(token), json={
+            'source_format': 'single-file',
             'name': 'Deferred Actions App', 'brief': 'A personal planning tool with a clear product document and weekly overview.',
             'backend_mode': 'static', 'auto_mode': False,
         })
