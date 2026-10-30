@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-30
 
-**Current focus:** Owner review of the successful end-to-end Mini-Twitter retry
+**Current focus:** Owner retry of verification with symlink-safe snapshots
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -12,7 +12,14 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — Full Mini-Twitter retry and runtime verification fixes
+## Latest completed increment — Snapshot dependency-link hang fix
+
+- [x] **Stalled verification stopped.** The active job was cancelled and finalized, the blocking Studio process was interrupted, and incomplete snapshot residue was removed without touching other applications.
+- [x] **Root cause.** `frontend/node_modules` links to the shared dependency store, and snapshot `copytree` followed that link, copying thousands of files while blocking the event loop and health endpoint.
+- [x] **Symlink-safe snapshots.** Attempt backups now preserve symbolic links rather than recursively copying their targets, so rollback and discard do not duplicate or delete shared dependencies.
+- [x] **Verification.** A focused backup/discard regression and full backend and generation-quality suites pass.
+
+## Earlier completed increment — Full Mini-Twitter retry and runtime verification fixes
 
 - [x] **Entity metadata normalization.** Entity labels map into presentation metadata, and descriptive entity/field fields no longer block valid AppSpec planning.
 - [x] **Deterministic browser loading.** Acceptance waits for initial data, delayed-loading evidence uses `route.fetch()` and delayed fulfillment, and validation counts are measured after initial loading completes.
@@ -351,3 +358,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-30 | AppSpec presentation compatibility | Normalized provider aliases and empty-state forms before strict validation, made canonical prompt keys explicit, and avoided unnecessary repair calls | 259 backend tests passed with 1 sandbox integration skipped; two quality evaluations and Ruff clean |
 | 2026-10-30 | Robust AppSpec planning boundary | Unwrapped provider envelopes, supplied authoritative product defaults, normalized API metadata/names, and verified a real Mini-Twitter DeepSeek proposal | 263 backend tests passed with 1 sandbox integration skipped; real DeepSeek proposal, two quality evaluations, and Ruff clean |
 | 2026-10-30 | Full Mini-Twitter retry and runtime verification fixes | Normalized entity metadata, made browser loading deterministic, handled seeded state, and preserved preview ports across restart | 265 backend tests passed with 1 sandbox integration skipped; real end-to-end retry passed 17/18 checks with only the intentional capability block; two quality evaluations and Ruff clean |
+| 2026-10-30 | Snapshot dependency-link hang fix | Cancelled the stalled verification, preserved dependency symlinks during attempt snapshots, and proved backup/discard leaves shared targets untouched | 266 backend tests passed with 1 sandbox integration skipped; two quality evaluations and Ruff clean |

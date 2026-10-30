@@ -3,10 +3,11 @@ import uuid
 
 import pytest
 
-from app.config import Settings
+from app.config import Settings, settings
 from app.database import workspace_db, workspace_for
 from app.frontend_builder import staging_directory, version_directory
 from app.jobs.idempotency import canonical_input_hash
+from app.jobs.snapshots import capture_attempt_snapshot, discard_attempt_snapshot
 from app.jobs.leases import finalize_job, lease_next_job, request_cancellation
 from app.jobs.models import JobCancelledError, StaleJobError
 from app.jobs.runner import run_generation_job
@@ -182,3 +183,26 @@ def test_verify_package_rejects_cancelled_outcome(monkeypatch):
     monkeypatch.setattr('app.verification.runner.run_generation_job', cancelled)
     with pytest.raises(JobCancelledError, match='cancelled'):
         asyncio.run(verify_package(user_id, project_id, 1, config=Settings(acceptance_gate_v1=True)))
+
+
+def test_snapshot_preserves_dependency_symlinks_without_copying_targets():
+    user_id = 940010
+    project_id = make_project(user_id)
+    frontend = version_directory(project_id, 1) / 'frontend'
+    frontend.mkdir(parents=True, exist_ok=True)
+    shared = settings.data_path / 'shared-node' / uuid.uuid4().hex
+    shared.mkdir(parents=True)
+    (shared / 'package.json').write_text('{"name":"shared-dependencies"}')
+    (frontend / 'node_modules').symlink_to(shared, target_is_directory=True)
+
+    snapshot = capture_attempt_snapshot(
+        user_id, project_id, 'snapshot-job', 1, 'verify-package', {'version': 1},
+    )
+    try:
+        linked = snapshot.backup_dir / 'frontend' / 'node_modules'
+        assert linked.is_symlink()
+        assert linked.readlink() == shared
+    finally:
+        discard_attempt_snapshot(snapshot)
+    assert not snapshot.backup_dir.exists()
+    assert (shared / 'package.json').is_file()

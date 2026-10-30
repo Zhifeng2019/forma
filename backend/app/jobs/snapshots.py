@@ -47,7 +47,7 @@ def capture_attempt_snapshot(
     if target.exists():
         backup = target.with_name(f'{target.name}.cancel-backup-{attempt_id}')
         _remove_tree(backup)
-        shutil.copytree(target, backup)
+        shutil.copytree(target, backup, symlinks=True)
     return AttemptSnapshot(
         user_id=user_id, project_id=project_id, job_id=job_id, attempt_id=attempt_id,
         action=action, target_version=target_version, project=dict(project),
