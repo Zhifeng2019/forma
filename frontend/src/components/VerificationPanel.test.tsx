@@ -89,4 +89,17 @@ describe('VerificationPanel', () => {
     expect(html).toContain('not ready to publish')
     expect(html).toContain('Advisory AI review')
   })
+
+  it('exposes diagnostic and screenshot evidence downloads', () => {
+    const withEvidence = withReport({
+      checks: [{
+        ...report.checks[0],
+        diagnostic_ref: 'acceptance/diagnostics/1-api.health.log',
+        evidence: [{ path: 'acceptance/evidence/browser.accessibility-keyboard.png', kind: 'image/png', bytes: 1200 }],
+      }],
+    })
+    const html = renderToStaticMarkup(<VerificationPanel project={{ ...project, verification: withEvidence }} onVerify={() => {}} busy={false} />)
+    expect(html).toContain('Download full log')
+    expect(html).toContain('Download screenshot 1')
+  })
 })

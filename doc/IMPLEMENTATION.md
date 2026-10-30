@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-30
 
-**Current focus:** SYS-04 — generated UI quality verification (next slice; not started)
+**Current focus:** SYS-05 — product-capability honesty (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -12,7 +12,15 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — SYS-03 runtime evidence and cleanup ownership
+## Latest completed increment — SYS-04 generated UI quality verification
+
+- [x] **SYS-04A — Accessibility checks.** Generated browser checks require one primary heading, labelled controls, keyboard navigation, and visible focus evidence.
+- [x] **SYS-04B — Responsive checks.** Desktop, tablet, and mobile viewports assert no horizontal overflow and capture layout screenshots.
+- [x] **SYS-04C — Interaction-state checks.** Phase 2 applications verify empty, populated, success, and error states, including delayed-loading evidence for FastAPI and populated mobile overflow checks.
+- [x] **SYS-04D — Evidence artifacts and access.** Reports include typed screenshot references and byte counts; owner-only evidence and diagnostics endpoints feed authenticated download controls in the verification panel.
+- [x] **SYS-04E — Cross-format verification.** Single-file and real Vite-built multi-file applications pass the new checks, generate eight screenshots per static Phase 2 run, and preserve full regression and quality gates.
+
+## Earlier completed increment — SYS-03 runtime evidence and cleanup ownership
 
 - [x] **SYS-03A — Complete redacted diagnostics.** Failed checks persist bounded full output as versioned artifacts with final-error summaries, tool-run references, and an owner-only diagnostics endpoint; advisory review receives final errors and cleanup context.
 - [x] **SYS-03B — Explicit restart identity.** Verification restart URLs select the version under test, while the existing restart API remains backward compatible by defaulting to the current version.
@@ -36,7 +44,6 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 - [x] **SYS-01D — Verification.** Full backend/frontend regressions, quality evaluations, production build, Ruff, and an in-memory Mini-Twitter AppSpec canary pass. Existing generated applications must be rebuilt to receive the new sources and acceptance artifacts.
 
 ## Planned system-wide corrective increments
-- [ ] **SYS-04 — Generated UI quality verification.** Responsive, accessibility, interaction-state, and screenshot evidence.
 - [ ] **SYS-05 — Product-capability honesty.** Detect unsupported briefs and expand workflow capabilities without app-specific exceptions.
 
 ## Earlier completed increment — VER-04 release gate and verification visibility
@@ -300,3 +307,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-30 | SYS-01 shared frontend correctness contracts | Browser-only datetime adaptation, semantic product headings, eight-field cross-architecture fixture, real generated Playwright workflow, full regressions, and Mini-Twitter AppSpec canary | 239 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |
 | 2026-10-30 | SYS-02 shared product UI foundation | Additive presentation metadata, domain labels, responsive theme and layouts, complete asynchronous states, synchronized acceptance contracts, worker provenance, and desktop/mobile review | 242 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; five generated Playwright journeys, two quality evaluations, Mini-Twitter hash-stable canary, production build, and Ruff clean |
 | 2026-10-30 | SYS-03 runtime evidence and cleanup ownership | Bounded full redacted diagnostics, owner-only log access, versioned restart, transient-race retries, isolated cleanup outcomes, and cancellation/snapshot fault coverage | 249 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |
+| 2026-10-30 | SYS-04 generated UI quality verification | Accessibility and keyboard checks, three responsive viewports, interaction-state coverage, screenshot evidence, owner-only downloads, and real single-file/Vite verification | 251 backend and 20 frontend unit tests passed with 1 sandbox integration skipped; eight screenshots per static Phase 2 run, two quality evaluations, production build, and Ruff clean |

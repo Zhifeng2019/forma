@@ -32,10 +32,11 @@ export type AppSpecDocument = {
 export type AppSpecEnvelope = {
   schema_version: string; compiler_version: string; spec_hash: string; spec: AppSpecDocument
 }
+export type VerificationEvidence = { path: string; kind: 'image/png'; bytes: number }
 export type VerificationCheck = {
   id: string; kind: string; target: string; status: 'passed' | 'failed' | 'blocked' | 'skipped'
   required: boolean; mutates: boolean; tool_run_id: string; duration_ms: number
-  output_ref: string; error?: string
+  output_ref: string; error?: string; diagnostic_ref?: string; evidence?: VerificationEvidence[]
 }
 export type ModelReviewSuggestion = { title: string; detail: string; severity: 'low' | 'medium' | 'high'; target: string }
 export type ModelReview = {

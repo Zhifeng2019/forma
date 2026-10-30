@@ -16,7 +16,10 @@ from .llm import GenerationError
 from .backend_engine import BACKEND_PATH, REQUIREMENTS_PATH
 from .config import settings
 from .runtime import RuntimeLaunchError, inject_runtime_bootstrap, runtime_manager
-from .frontend_builder import PackageBuildError, deployment_archive, ensure_frontend_build, frontend_asset_path
+from .frontend_builder import (
+    PackageBuildError, deployment_archive, ensure_frontend_build, frontend_asset_path,
+    safe_path, version_directory,
+)
 from .features import FeatureFlag, feature_enabled
 from .jobs.events import follow_frames, high_watermark, replay_events, replay_frames
 from .jobs.leases import request_cancellation
@@ -390,6 +393,24 @@ def get_verification_diagnostic(
     if not row:
         raise HTTPException(404, 'Verification diagnostic not found')
     return Response(content=row['content'], media_type='text/plain; charset=utf-8')
+
+
+@router.get('/projects/{project_id}/verification/evidence')
+def get_verification_evidence(
+    project_id: str, path: str, version: int | None = None, user=Depends(current_user),
+):
+    project = owned_project(user['id'], project_id)
+    pure = PurePosixPath(path)
+    if pure.is_absolute() or '..' in pure.parts or not path.startswith('acceptance/evidence/'):
+        raise HTTPException(404, 'Verification evidence not found')
+    selected_version = version or project['current_version']
+    try:
+        target = safe_path(version_directory(project_id, selected_version), path)
+    except PackageBuildError as exc:
+        raise HTTPException(404, 'Verification evidence not found') from exc
+    if not target.is_file():
+        raise HTTPException(404, 'Verification evidence not found')
+    return FileResponse(target)
 
 
 @router.post('/projects/{project_id}/verify')

@@ -111,12 +111,26 @@ def _persist_diagnostic(
     return relative
 
 
+def _evidence_for_check(root: Path, check: dict) -> list[dict]:
+    if check['id'] not in {'browser.accessibility', 'browser.responsive-layout', 'browser.interaction-states'}:
+        return []
+    evidence = root / 'acceptance' / 'evidence'
+    return [{
+        'path': path.relative_to(root).as_posix(),
+        'kind': 'image/png',
+        'bytes': path.stat().st_size,
+    } for path in sorted(evidence.glob(f'{check["id"]}-*.png')) if path.is_file()]
+
+
 def _base_environment(user_id: int, project_id: str, version: int, context: dict) -> dict:
     root = version_directory(project_id, version)
+    evidence = root / 'acceptance' / 'evidence'
+    evidence.mkdir(parents=True, exist_ok=True)
     token = create_token(user_id)
     studio = settings.studio_base_url.rstrip('/')
     env = {
         'APP_SOURCE_DIR': str(root),
+        'APP_EVIDENCE_DIR': str(evidence),
         'APP_PREVIEW_URL': f'{studio}/api/projects/{project_id}/preview?access_token={quote(token)}&version={version}',
         'FORMA_BASE_URL': studio,
         'FORMA_TOKEN': token,
@@ -282,6 +296,9 @@ async def _execute_check(
         user_id, project_id, version, job_id, attempt_id, check, context, run.id, diagnostics,
     ) if status == 'failed' and diagnostics else None
     result = check_result(check, status, run.id, duration_ms, error, diagnostic_ref=diagnostic_ref)
+    evidence = _evidence_for_check(version_directory(project_id, version), check)
+    if evidence:
+        result['evidence'] = evidence
     finish_tool_run(
         run, status, output_ref=diagnostic_ref or result['output_ref'], error=error,
         ended_at=ended_at, duration_ms=duration_ms,

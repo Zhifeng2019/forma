@@ -180,6 +180,7 @@ test('storage failures show an actionable offline error', async ({ page }) => {
     env = dict(os.environ)
     env.update({
         'APP_PREVIEW_URL': (root / 'index.html').as_uri(),
+        'APP_EVIDENCE_DIR': str(root / 'acceptance' / 'evidence'),
         'NO_COLOR': '1',
         'NODE_PATH': str(frontend / 'node_modules'),
         'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD': '1',

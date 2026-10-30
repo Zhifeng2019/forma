@@ -1,9 +1,41 @@
-import { AlertTriangle, CheckCircle2, Clock3, LoaderCircle, Play, ShieldCheck, Sparkles, XCircle } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, CheckCircle2, Clock3, Download, LoaderCircle, Play, ShieldCheck, Sparkles, XCircle } from 'lucide-react'
+import { getToken } from '../api'
 import type { Project, VerificationCheck } from '../types'
 import './VerificationReview.css'
 
 function duration(value: number) {
   return value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(1)} s`
+}
+
+function ArtifactButton({ projectId, version, path, kind, label }: {
+  projectId: string; version: number; path: string; kind: 'diagnostics' | 'evidence'; label: string
+}) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('')
+  const download = async () => {
+    setBusy(true); setError('')
+    try {
+      const token = getToken()
+      const response = await fetch(
+        `/api/projects/${projectId}/verification/${kind}?path=${encodeURIComponent(path)}&version=${version}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      )
+      if (!response.ok) throw new Error('The verification artifact is unavailable.')
+      const url = URL.createObjectURL(await response.blob())
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = path.split('/').pop() || 'verification-artifact'
+      document.body.append(anchor)
+      anchor.click()
+      anchor.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The verification artifact is unavailable.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <span className="artifact-action"><button type="button" className="button ghost artifact-button" disabled={busy} onClick={download}><Download size={12} />{busy ? 'Downloading…' : label}</button>{error && <small className="artifact-error" role="alert">{error}</small>}</span>
 }
 
 function CheckStatus({ status }: { status: VerificationCheck['status'] }) {
@@ -29,7 +61,7 @@ export function VerificationPanel({ project, onVerify, busy }: {
       {report.summary.required_failures.length > 0 && <div className="verification-failures"><strong>Required failures</strong><ul>{report.summary.required_failures.map(id => <li key={id}>{id}</li>)}</ul></div>}
       {report.summary.optional_failures.length > 0 && <div className="verification-warnings"><strong>Optional failures</strong><ul>{report.summary.optional_failures.map(id => <li key={id}>{id}</li>)}</ul></div>}
       {report.review && <section className={`model-review ${report.review.status}`}><header><span className="model-review-icon"><Sparkles size={17} /></span><div><h3>Advisory model review</h3><p>Suggestions only. This review does not affect verification or release decisions.</p></div><span className="model-review-status">{report.review.status}</span></header>{report.review.summary && <p className="model-review-summary">{report.review.summary}</p>}{report.review.error && <p className="verification-error">{report.review.error}</p>}{report.review.suggestions.length > 0 && <ul className="model-suggestions">{report.review.suggestions.map((suggestion, index) => <li key={`${suggestion.title}-${index}`}><span className={`model-severity ${suggestion.severity}`}>{suggestion.severity}</span><div><strong>{suggestion.title}</strong><p>{suggestion.detail}</p>{suggestion.target && <code>{suggestion.target}</code>}</div></li>)}</ul>}</section>}
-      <section className="verification-checks"><header><h3>Check results</h3><span>{report.checks.length} checks</span></header>{report.checks.map(check => <article className={`verification-check ${check.status}`} key={`${check.tool_run_id}-${check.id}`}><span className="verification-check-icon"><CheckStatus status={check.status} /></span><div className="verification-check-main"><div className="verification-check-title"><strong>{check.id}</strong><span className={`check-kind ${check.status}`}>{check.status}</span>{check.required ? <span className="check-required">required</span> : <span className="check-optional">optional</span>}{check.mutates && <span className="check-mutates">mutates</span>}</div><div className="verification-check-meta"><span>{check.kind}</span><code>{check.target}</code><span>{duration(check.duration_ms)}</span></div><small>Tool: {check.output_ref}</small>{check.error && <p className="verification-error">{check.error}</p>}</div></article>)}</section>
+      <section className="verification-checks"><header><h3>Check results</h3><span>{report.checks.length} checks</span></header>{report.checks.map(check => <article className={`verification-check ${check.status}`} key={`${check.tool_run_id}-${check.id}`}><span className="verification-check-icon"><CheckStatus status={check.status} /></span><div className="verification-check-main"><div className="verification-check-title"><strong>{check.id}</strong><span className={`check-kind ${check.status}`}>{check.status}</span>{check.required ? <span className="check-required">required</span> : <span className="check-optional">optional</span>}{check.mutates && <span className="check-mutates">mutates</span>}</div><div className="verification-check-meta"><span>{check.kind}</span><code>{check.target}</code><span>{duration(check.duration_ms)}</span></div><small>Tool: {check.output_ref}</small><div className="verification-artifacts">{check.diagnostic_ref && <ArtifactButton projectId={project.id} version={report.version} path={check.diagnostic_ref} kind="diagnostics" label="Download full log" />}{check.evidence?.map((item, index) => <ArtifactButton key={item.path} projectId={project.id} version={report.version} path={item.path} kind="evidence" label={`Download screenshot ${index + 1}`} />)}</div>{check.error && <p className="verification-error">{check.error}</p>}</div></article>)}</section>
     </>}
   </div>
 }

@@ -3,6 +3,7 @@
 import re
 
 from ..spec.presentation import resolve_presentation
+from .browser_ui_quality import generate_ui_quality_tests
 from .common import (
     AcceptanceContext, GeneratedCheck, create_payload, javascript_json, required_string,
 )
@@ -34,8 +35,10 @@ def generate_browser_tests(context: AcceptanceContext) -> tuple[dict[str, str], 
     record_text = next((field['value'] for field in fields if field['kind'] in {'string', 'text'}),
                        str(fields[0]['value']) if fields else '')
     header = f'''import {{ test, expect }} from '@playwright/test'
+import path from 'node:path'
 
 const PREVIEW_URL = process.env.APP_PREVIEW_URL || ''
+const EVIDENCE_DIR = process.env.APP_EVIDENCE_DIR || ''
 const PRIMARY_HEADING = {javascript_json(presentation.headline if presentation else spec.product.name)}
 const PRIMARY_WORKFLOW = {javascript_json(spec.product.primary_workflow)}
 const CREATE_LABEL = {javascript_json(presentation.create_label if presentation else 'Create record')}
@@ -43,6 +46,12 @@ const DELETE_LABEL = {javascript_json(presentation.delete_label if presentation 
 const FIELDS = {javascript_json(fields)}
 const RECORD_TEXT = {javascript_json(record_text)}
 const COLLECTION_KEY = {javascript_json(contract.collection if contract else '')}
+const STORAGE_KEY = {javascript_json(f'forma-appspec:{spec.product.name}:{contract.collection if contract else ""}')}
+
+const capture = async (page, name) => {{
+  if (!EVIDENCE_DIR) throw new Error('APP_EVIDENCE_DIR is required')
+  await page.screenshot({{ path: path.join(EVIDENCE_DIR, `${{name}}.png`), fullPage: true }})
+}}
 
 const openApp = async page => {{
   if (!PREVIEW_URL) throw new Error('APP_PREVIEW_URL is required')
@@ -135,6 +144,10 @@ test('invalid input returns an error without creating a record', async ({{ page 
                                              'invalid input returns an error without creating a record',
                                              'acceptance/browser_tests.spec.js', mutates=True,
                                              environment=('APP_PREVIEW_URL',)))
+    quality_tests, quality_checks = generate_ui_quality_tests(context)
+    if quality_tests:
+        tests.append(quality_tests)
+    checks.extend(quality_checks)
     config = (
         "import { defineConfig } from '@playwright/test'\n\n"
         "export default defineConfig({ testDir: '.', workers: 1, timeout: 90000, "

@@ -47,12 +47,16 @@ def test_acceptance_generation_is_deterministic_and_provenance_complete():
     assert {
         'build.production', 'api.health', 'api.crud', 'api.required-validation', 'persistence.restart',
         'browser.primary-workflow', 'browser.required-fields', 'browser.create-refresh-delete',
-        'browser.validation-feedback', 'security.no-embedded-credentials',
+        'browser.validation-feedback', 'browser.accessibility', 'browser.responsive-layout',
+        'browser.interaction-states', 'security.no-embedded-credentials',
         'security.no-host-environment-access', 'security.reviewed-dependencies',
         'security.no-external-frontend-urls', 'security.archive-exclusions',
         'migration.preserves-phase-and-publication', 'migration.republish-preserves-history',
     } <= ids
     checks = {check['id']: check for check in document['checks']}
+    assert checks['browser.accessibility']['environment'] == ['APP_PREVIEW_URL', 'APP_EVIDENCE_DIR']
+    assert checks['browser.responsive-layout']['environment'] == ['APP_PREVIEW_URL', 'APP_EVIDENCE_DIR']
+    assert checks['browser.interaction-states']['environment'] == ['APP_PREVIEW_URL', 'APP_EVIDENCE_DIR']
     assert checks['persistence.restart']['environment'] == ['APP_BASE_URL', 'APP_RESTART_URL']
     assert checks['security.archive-exclusions']['environment'] == ['APP_SOURCE_DIR', 'APP_PACKAGE_ZIP']
     assert checks['migration.preserves-phase-and-publication']['required'] is False
@@ -71,7 +75,8 @@ def test_static_and_legacy_specs_generate_only_applicable_checks():
     ids = {check['id'] for check in document['checks']}
     assert 'api.health' not in ids and 'api.crud' not in ids
     assert 'browser.phase-one-read-only' in ids
-    assert 'browser.create-refresh-delete' not in ids
+    assert 'browser.accessibility' in ids and 'browser.responsive-layout' in ids
+    assert 'browser.create-refresh-delete' not in ids and 'browser.interaction-states' not in ids
     assert 'security.archive-exclusions' not in ids
     assert 'No backend API operations' in static['acceptance/api_tests.py']
     compile(static['acceptance/security_tests.py'], 'acceptance/security_tests.py', 'exec')
