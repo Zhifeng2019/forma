@@ -12,9 +12,10 @@ from .context import JobContext, activate_job_context, reset_job_context
 from .idempotency import canonical_input_hash
 from .leases import complete_attempt, finalize_job, heartbeat, lease_next_job
 from .models import JobCancelledError, JobStatus, LeaseLostError
+from .redaction import redact_output
 from .service import create_job, get_job, record_event
 from .snapshots import (
-    capture_attempt_snapshot, discard_attempt_snapshot, rollback_attempt_snapshot,
+    AttemptSnapshot, capture_attempt_snapshot, discard_attempt_snapshot, rollback_attempt_snapshot,
 )
 from .transactions import job_transaction
 from .tool_runs import close_open_tool_runs
@@ -102,6 +103,38 @@ def _record_project_refresh(db: sqlite3.Connection, job_id: str, attempt: dict, 
     }, f'{attempt["attempt_id"]}:project.refresh')
 
 
+def _record_cleanup_failure(snapshot: AttemptSnapshot, stage: str, exc: BaseException) -> None:
+    try:
+        with workspace_db(snapshot.user_id) as db:
+            record_event(db, snapshot.job_id, 'attempt.cleanup_failed', {
+                'stage': stage, 'error': redact_output(f'{type(exc).__name__}: {exc}')[:2000],
+            }, f'{snapshot.attempt_id}:cleanup_failed:{stage}')
+    except Exception:
+        # Cleanup reporting must never replace the operation's original outcome.
+        pass
+
+
+async def _rollback_snapshot(snapshot: AttemptSnapshot) -> None:
+    from ..runtime import runtime_manager
+
+    try:
+        await runtime_manager.stop_project(snapshot.project_id, channel='preview')
+    except Exception as exc:
+        _record_cleanup_failure(snapshot, 'runtime-stop', exc)
+    try:
+        rollback_attempt_snapshot(snapshot)
+    except Exception as exc:
+        _record_cleanup_failure(snapshot, 'rollback', exc)
+        raise
+
+
+def _discard_snapshot(snapshot: AttemptSnapshot) -> None:
+    try:
+        discard_attempt_snapshot(snapshot)
+    except Exception as exc:
+        _record_cleanup_failure(snapshot, 'snapshot-discard', exc)
+
+
 def _mark_cancelling(user_id: int, job_id: str, attempt: dict) -> None:
     with workspace_db(user_id) as db:
         with job_transaction(db):
@@ -182,7 +215,7 @@ async def run_generation_job(
             _mark_cancelling(user_id, job_id, attempt)
             operation.cancel()
             await asyncio.gather(operation, return_exceptions=True)
-            rollback_attempt_snapshot(snapshot)
+            await _rollback_snapshot(snapshot)
             _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation cancelled. Retry this stage.')
             return True
         if operation not in done and heartbeat_task in done:
@@ -214,20 +247,20 @@ async def run_generation_job(
                     })
         if cancelled:
             _mark_cancelling(user_id, job_id, attempt)
-            rollback_attempt_snapshot(snapshot)
+            await _rollback_snapshot(snapshot)
             _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation cancelled. Retry this stage.')
             return True
         close_open_tool_runs(user_id, job_id, attempt['attempt_id'], 'failed', 'open_at_job_completion')
         return True
     except JobCancelledError:
         _mark_cancelling(user_id, job_id, attempt)
-        rollback_attempt_snapshot(snapshot)
+        await _rollback_snapshot(snapshot)
         _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation cancelled. Retry this stage.')
         return True
     except asyncio.CancelledError:
         operation.cancel()
         await asyncio.gather(operation, return_exceptions=True)
-        rollback_attempt_snapshot(snapshot)
+        await _rollback_snapshot(snapshot)
         _cancel_attempt(user_id, project_id, job_id, attempt, 'Generation stopped. Retry this stage.')
         raise
     except Exception as exc:
@@ -242,5 +275,5 @@ async def run_generation_job(
         await asyncio.gather(cancellation_waiter, heartbeat_task, return_exceptions=True)
         if cancellation_event(job_id) is cancellation:
             clear_job(job_id)
-        discard_attempt_snapshot(snapshot)
+        _discard_snapshot(snapshot)
         reset_job_context(context_token)

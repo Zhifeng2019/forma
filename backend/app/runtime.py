@@ -10,7 +10,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import signal
 import socket
 import sys
@@ -22,6 +21,7 @@ from .engine import validate_project_id
 from .features import FeatureFlag, feature_enabled
 from .frontend_builder import PackageBuildError, write_source_files
 from .jobs.context import current_job_context
+from .jobs.file_cleanup import remove_tree
 from .jobs.idempotency import canonical_input_hash
 from .jobs.models import JobCancelledError
 from .jobs.processes import executable_version, run_process
@@ -540,7 +540,7 @@ class RuntimeManager:
         await self.stop_project(project_id)
         root = settings.data_path / 'projects' / project_id
         if root.exists():
-            shutil.rmtree(root)
+            remove_tree(root)
 
     async def _make_capacity(self, requested_key: str) -> None:
         for key, runtime in list(self._runtimes.items()):

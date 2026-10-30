@@ -10,6 +10,7 @@ def check_result(
     duration_ms: int,
     error: str | None = None,
     output_ref: str | None = None,
+    diagnostic_ref: str | None = None,
 ) -> dict:
     if status not in {'passed', 'failed', 'blocked', 'skipped'}:
         raise ValueError(f'Unsupported verification result status: {status}')
@@ -20,7 +21,9 @@ def check_result(
         'output_ref': output_ref or f'{check["file"]}#{check["test"]}',
     }
     if error:
-        result['error'] = error[:2000]
+        result['error'] = error[-2000:]
+    if diagnostic_ref:
+        result['diagnostic_ref'] = diagnostic_ref
     return result
 
 

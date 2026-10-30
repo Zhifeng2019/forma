@@ -6,6 +6,7 @@ import shutil
 
 from ..database import workspace_db
 from ..frontend_builder import staging_directory, version_directory
+from .file_cleanup import remove_tree
 
 
 @dataclass
@@ -24,10 +25,7 @@ class AttemptSnapshot:
 
 
 def _remove_tree(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    elif path.exists() or path.is_symlink():
-        path.unlink()
+    remove_tree(path)
 
 
 def capture_attempt_snapshot(

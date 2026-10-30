@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import PurePosixPath
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
@@ -374,6 +375,23 @@ def get_verification(project_id: str, version: int | None = None, user=Depends(c
     return {'report': payload['verification'], 'running': payload['verification_running']}
 
 
+@router.get('/projects/{project_id}/verification/diagnostics')
+def get_verification_diagnostic(
+    project_id: str, path: str, version: int | None = None, user=Depends(current_user),
+):
+    project = owned_project(user['id'], project_id)
+    pure = PurePosixPath(path)
+    if pure.is_absolute() or '..' in pure.parts or not path.startswith('acceptance/diagnostics/'):
+        raise HTTPException(404, 'Verification diagnostic not found')
+    selected_version = version or project['current_version']
+    with workspace_db(user['id']) as db:
+        row = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?',
+                         (project_id, path, selected_version)).fetchone()
+    if not row:
+        raise HTTPException(404, 'Verification diagnostic not found')
+    return Response(content=row['content'], media_type='text/plain; charset=utf-8')
+
+
 @router.post('/projects/{project_id}/verify')
 async def verify_project(project_id: str, body: VerificationInput, user=Depends(current_user)):
     project = owned_project(user['id'], project_id)
@@ -603,21 +621,22 @@ async def runtime_status(project_id: str, check: bool = False, user=Depends(curr
 
 
 @router.post('/projects/{project_id}/runtime/restart')
-async def restart_runtime(project_id: str, user=Depends(current_user)):
+async def restart_runtime(project_id: str, version: int | None = None, user=Depends(current_user)):
     project = owned_project(user['id'], project_id)
     if project['backend_mode'] != 'fastapi' or not project['current_version']:
         raise HTTPException(409, 'Build a FastAPI application before restarting its runtime')
-    source, requirements, source_format, files = runtime_artifacts(user['id'], project_id, project['current_version'])
+    selected_version = version or project['current_version']
+    source, requirements, source_format, files = runtime_artifacts(user['id'], project_id, selected_version)
     try:
         result = await runtime_manager.restart(
-            project_id, project['current_version'], source, requirements, source_format, files,
+            project_id, selected_version, source, requirements, source_format, files,
         )
     except RuntimeLaunchError as exc:
         with workspace_db(user['id']) as db:
-            add_event(db, project_id, f'Backend restart failed: {exc}', 'error')
-        raise HTTPException(503, str(exc)) from exc
+            add_event(db, project_id, f'Backend restart failed for version {selected_version}: {exc}', 'error')
+        raise HTTPException(503, f'FastAPI version {selected_version} restart failed: {exc}') from exc
     with workspace_db(user['id']) as db:
-        add_event(db, project_id, f'FastAPI version {project["current_version"]} restarted and healthy', 'success')
+        add_event(db, project_id, f'FastAPI version {selected_version} restarted and healthy', 'success')
     return result
 
 

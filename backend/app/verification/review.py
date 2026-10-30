@@ -65,12 +65,14 @@ def _suggestions(value) -> list[dict]:
 def _prompt(report: dict) -> str:
     checks = [{
         'id': check['id'], 'status': check['status'], 'required': check['required'],
-        'error': check.get('error', '')[:600],
+        'error': check.get('error', '')[-1200:],
+        'diagnostic_ref': check.get('diagnostic_ref'),
     } for check in report['checks']]
     return (
         f'Review the deterministic verification outcomes for {report["project_id"]} version {report["version"]}.\n'
         f'Spec hash: {report["spec_hash"]}\nSource hash: {report["source_hash"]}\n'
         f'Deterministic status: {report["status"]}; can_publish={report["can_publish"]}.\n'
+        f'Cleanup: {json.dumps(report.get("cleanup", {"status": "not_reported"}))}\n'
         f'Checks: {json.dumps(checks, ensure_ascii=False)}\n'
         'Offer concise implementation suggestions only. Do not modify release decisions or waive failures.'
     )

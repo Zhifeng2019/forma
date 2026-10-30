@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-30
 
-**Current focus:** SYS-03 — runtime evidence and cleanup ownership (next slice; not started)
+**Current focus:** SYS-04 — generated UI quality verification (next slice; not started)
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -12,7 +12,15 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — SYS-02 shared product UI foundation
+## Latest completed increment — SYS-03 runtime evidence and cleanup ownership
+
+- [x] **SYS-03A — Complete redacted diagnostics.** Failed checks persist bounded full output as versioned artifacts with final-error summaries, tool-run references, and an owner-only diagnostics endpoint; advisory review receives final errors and cleanup context.
+- [x] **SYS-03B — Explicit restart identity.** Verification restart URLs select the version under test, while the existing restart API remains backward compatible by defaulting to the current version.
+- [x] **SYS-03C — Safe cleanup primitives.** Shared idempotent deletion retries transient `ENOTEMPTY`/`EBUSY` races without hiding persistent errors; build, snapshot, and runtime cleanup use the same policy.
+- [x] **SYS-03D — Isolated cleanup outcomes.** Verification records cleanup separately and blocks publishing on cleanup failure without replacing check results; cancellation stops preview runtimes before rollback, and snapshot-discard failures cannot replace successful jobs.
+- [x] **SYS-03E — Fault-injection verification.** Long redacted logs, owner isolation, explicit versions, cleanup failures, transient directory races, and snapshot-discard faults pass alongside full regressions.
+
+## Earlier completed increment — SYS-02 shared product UI foundation
 
 - [x] **SYS-02A — Additive presentation contract.** Optional headline, entity, action, and empty-state metadata drives product-facing copy while legacy AppSpecs retain their original hashes and receive deterministic defaults.
 - [x] **SYS-02B — Domain-aware labels.** Frontend and acceptance generators share one presentation resolver; entity labels come from domain semantics rather than transport paths, with no hard-coded per-application branches.
@@ -28,7 +36,6 @@ Do not mark a milestone complete until its acceptance gate is verified. Keep sch
 - [x] **SYS-01D — Verification.** Full backend/frontend regressions, quality evaluations, production build, Ruff, and an in-memory Mini-Twitter AppSpec canary pass. Existing generated applications must be rebuilt to receive the new sources and acceptance artifacts.
 
 ## Planned system-wide corrective increments
-- [ ] **SYS-03 — Runtime evidence and cleanup ownership.** Structured restart diagnostics, explicit version identity, and isolated cleanup outcomes.
 - [ ] **SYS-04 — Generated UI quality verification.** Responsive, accessibility, interaction-state, and screenshot evidence.
 - [ ] **SYS-05 — Product-capability honesty.** Detect unsupported briefs and expand workflow capabilities without app-specific exceptions.
 
@@ -292,3 +299,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-29 | Mini-Twitter health contract normalization | Cleared entity assignment from `/api/health`, recovered AppSpec and Phase 1 through the live backend, two quality evaluations, and full regressions | 232 backend and 19 frontend unit tests passed; production build and Ruff clean |
 | 2026-10-30 | SYS-01 shared frontend correctness contracts | Browser-only datetime adaptation, semantic product headings, eight-field cross-architecture fixture, real generated Playwright workflow, full regressions, and Mini-Twitter AppSpec canary | 239 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |
 | 2026-10-30 | SYS-02 shared product UI foundation | Additive presentation metadata, domain labels, responsive theme and layouts, complete asynchronous states, synchronized acceptance contracts, worker provenance, and desktop/mobile review | 242 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; five generated Playwright journeys, two quality evaluations, Mini-Twitter hash-stable canary, production build, and Ruff clean |
+| 2026-10-30 | SYS-03 runtime evidence and cleanup ownership | Bounded full redacted diagnostics, owner-only log access, versioned restart, transient-race retries, isolated cleanup outcomes, and cancellation/snapshot fault coverage | 249 backend and 19 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |

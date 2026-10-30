@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 from urllib.parse import quote
@@ -18,6 +19,7 @@ from ..frontend_builder import (
 from ..jobs.idempotency import canonical_input_hash, job_idempotency_key
 from ..jobs.models import JobCancelledError
 from ..jobs.processes import run_process
+from ..jobs.redaction import redact_output
 from ..jobs.runner import run_generation_job
 from ..jobs.service import record_event
 from ..jobs.tool_runs import finish_tool_run, start_tool_run
@@ -87,6 +89,28 @@ def latest_verification_report(user_id: int, job_id: str) -> dict | None:
     return json.loads(row['payload']) if row else None
 
 
+def _persist_diagnostic(
+    user_id: int, project_id: str, version: int, job_id: str, attempt_id: int,
+    check: dict, context: dict, tool_run_id: str, output: str,
+) -> str:
+    check_id = re.sub(r'[^A-Za-z0-9._-]+', '-', check['id'])[:120] or 'check'
+    relative = f'acceptance/diagnostics/{attempt_id}-{check_id}.log'
+    document = (
+        f'check_id={check["id"]}\njob_id={job_id}\nattempt_id={attempt_id}\n'
+        f'tool_run_id={tool_run_id}\nspec_hash={context["spec_hash"]}\n'
+        f'source_hash={context["source_hash"]}\n'
+        'output_policy=redacted; most recent 64000 characters\n\n'
+        f'{redact_output(output)[-64_000:]}\n'
+    )
+    target = safe_path(version_directory(project_id, version), relative)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(document)
+    with workspace_db(user_id) as db:
+        db.execute('INSERT OR REPLACE INTO artifacts(project_id,stage,path,content,version) VALUES(?,?,?,?,?)',
+                   (project_id, 'verification', relative, document, version))
+    return relative
+
+
 def _base_environment(user_id: int, project_id: str, version: int, context: dict) -> dict:
     root = version_directory(project_id, version)
     token = create_token(user_id)
@@ -131,7 +155,9 @@ async def _add_runtime_environment(user_id: int, project_id: str, version: int, 
         context['spec_hash'],
     )
     env['APP_BASE_URL'] = f'http://127.0.0.1:{runtime.port}'
-    env['APP_RESTART_URL'] = f'{settings.studio_base_url.rstrip("/")}/api/projects/{project_id}/runtime/restart'
+    env['APP_RESTART_URL'] = (
+        f'{settings.studio_base_url.rstrip("/")}/api/projects/{project_id}/runtime/restart?version={version}'
+    )
     return status['status'] != 'running'
 
 
@@ -160,8 +186,11 @@ def _process_environment(root: Path, env: dict) -> dict:
 async def _execute_process(
     command: list[str], cwd: Path, env: dict, timeout: int, tool_run_id: str,
 ) -> tuple[int, str]:
-    result = await run_process(command, cwd, env, timeout, 'execute an acceptance check', tool_run_id=tool_run_id)
-    return result.returncode, result.output[-4000:]
+    result = await run_process(
+        command, cwd, env, timeout, 'execute an acceptance check', tool_run_id=tool_run_id,
+        output_limit=64_000,
+    )
+    return result.returncode, result.output
 
 
 def _command_for_check(root: Path, check: dict) -> tuple[list[str], Path]:
@@ -221,6 +250,7 @@ async def _execute_check(
     started = time.monotonic()
     status = 'passed'
     error = None
+    diagnostics = ''
     try:
         if failure_reason:
             raise GenerationError(failure_reason)
@@ -240,15 +270,20 @@ async def _execute_check(
                 )
                 if returncode:
                     status = 'failed'
+                    diagnostics = output
                     error = output or f'Acceptance process exited with status {returncode}.'
     except Exception as exc:
         status = 'failed' if status != 'blocked' else status
-        error = f'{type(exc).__name__}: {str(exc)[:1800]}'
+        error = f'{type(exc).__name__}: {exc}'
+        diagnostics = error
     ended_at = utc_now()
     duration_ms = max(0, round((time.monotonic() - started) * 1000))
-    result = check_result(check, status, run.id, duration_ms, error)
+    diagnostic_ref = _persist_diagnostic(
+        user_id, project_id, version, job_id, attempt_id, check, context, run.id, diagnostics,
+    ) if status == 'failed' and diagnostics else None
+    result = check_result(check, status, run.id, duration_ms, error, diagnostic_ref=diagnostic_ref)
     finish_tool_run(
-        run, status, output_ref=result['output_ref'], error=error,
+        run, status, output_ref=diagnostic_ref or result['output_ref'], error=error,
         ended_at=ended_at, duration_ms=duration_ms,
     )
     return result
@@ -266,6 +301,7 @@ async def _run_verification(
     overall_started = time.monotonic()
     env = _base_environment(user_id, project_id, version, context)
     results = []
+    cleanup_errors = []
     runtime_started = False
     acceptance_ready = False
     dependent_blocked = None
@@ -306,13 +342,19 @@ async def _run_verification(
                 ))
     finally:
         if runtime_started:
-            await runtime_manager.stop_project(project_id, channel='preview')
+            try:
+                await runtime_manager.stop_project(project_id, channel='preview')
+            except Exception as exc:
+                cleanup_errors.append(redact_output(f'{type(exc).__name__}: {exc}'))
     ended_at = utc_now()
     duration_ms = max(0, round((time.monotonic() - overall_started) * 1000))
     report = build_report(
         project_id, version, job_id, attempt_id, context['spec_hash'], context['source_hash'],
         overall_started_at, ended_at, duration_ms, results, context['complete_coverage'],
     )
+    report['cleanup'] = {'status': 'failed' if cleanup_errors else 'passed', 'errors': cleanup_errors}
+    if cleanup_errors:
+        report['can_publish'] = False
     content = report_json(report)
     report_path = version_directory(project_id, version) / 'acceptance' / 'report.json'
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -321,6 +363,9 @@ async def _run_verification(
         db.execute('INSERT OR REPLACE INTO artifacts(project_id,stage,path,content,version) VALUES(?,?,?,?,?)',
                    (project_id, 'verification', 'acceptance/report.json', content, version))
         record_event(db, job_id, 'verification_report', report, f'{attempt_id}:verification_report')
+        if cleanup_errors:
+            record_event(db, job_id, 'verification_cleanup_failed', {'errors': cleanup_errors},
+                         f'{attempt_id}:verification_cleanup_failed')
     return report
 
 

@@ -9,6 +9,7 @@ import shutil
 import zipfile
 
 from .config import settings
+from .jobs.file_cleanup import remove_tree
 from .jobs.idempotency import canonical_input_hash
 from .jobs.processes import executable_version, run_process
 from .jobs.tool_runs import finish_tool_run, start_tool_run
@@ -40,10 +41,7 @@ def staging_directory(project_id: str, version: int) -> Path:
 
 
 def _remove_tree(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    elif path.exists() or path.is_symlink():
-        path.unlink()
+    remove_tree(path)
 
 
 def _assert_immutable_source(root: Path, files: dict[str, str]) -> None:
