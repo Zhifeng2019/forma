@@ -209,3 +209,37 @@ def test_health_operation_cannot_reference_an_entity(monkeypatch):
     ))
     health = next(operation for operation in spec.api if operation.path == '/api/health')
     assert health.entity is None
+
+
+@pytest.mark.parametrize('empty_state,expected_title,expected_message', [
+    ({'title': 'No tasks yet', 'message': 'Add your first task.'}, 'No tasks yet', 'Add your first task.'),
+    ('Add your first task.', None, 'Add your first task.'),
+])
+def test_presentation_aliases_are_normalized_without_repair(monkeypatch, empty_state, expected_title, expected_message):
+    document = proposal()
+    document['frontend']['presentation'] = {
+        'primary_headline': 'Focus on useful work',
+        'entity_label_singular': 'task',
+        'entity_label_plural': 'tasks',
+        'primary_create_label': 'Add a task',
+        'empty_state': empty_state,
+    }
+    calls = []
+
+    async def complete(*_args):
+        calls.append(True)
+        return document
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Task App', 'A focused task workflow', 'multi-file', 'fastapi',
+    ))
+    presentation = spec.frontend.presentation
+    assert presentation.headline == 'Focus on useful work'
+    assert presentation.entity_label == 'task' and presentation.entity_plural_label == 'tasks'
+    assert presentation.create_label == 'Add a task'
+    assert presentation.empty_title == expected_title
+    assert presentation.empty_message == expected_message
+    serialized = presentation.model_dump(mode='json', exclude_none=True)
+    assert not {'primary_headline', 'entity_label_singular', 'entity_label_plural', 'primary_create_label', 'empty_state'} & serialized.keys()
+    assert len(calls) == 1

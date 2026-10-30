@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-30
 
-**Current focus:** Owner retry of Mini-Twitter design generation
+**Current focus:** Owner retry of AppSpec planning and design generation
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -12,7 +12,14 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — LLM continuation and document-JSON robustness
+## Latest completed increment — AppSpec presentation compatibility
+
+- [x] **Provider alias normalization.** Known presentation variants map to canonical AppSpec fields before validation, including singular/plural labels, primary headline/create labels, and object or string empty states.
+- [x] **Strict-schema preservation.** Canonical values win, unknown fields still fail closed, and valid aliases no longer consume the bounded semantic-repair attempt.
+- [x] **Explicit generation contract.** The proposal prompt now names only the six supported presentation keys.
+- [x] **Verification.** Both empty-state forms, no-repair compatibility, full backend regressions, and generation-quality evaluations pass.
+
+## Earlier completed increment — LLM continuation and document-JSON robustness
 
 - [x] **Provider evidence.** The Mini-Twitter design failure used `stop`, not the output-token limit, and reached the JSON repair attempt; truncation and malformed document JSON require separate handling.
 - [x] **Bounded continuation.** A true `length` response now receives one continuation request, preserves the full assistant fragment, and parses either a continuation or a complete replacement JSON before failing.
@@ -326,3 +333,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-30 | SYS-04 generated UI quality verification | Accessibility and keyboard checks, three responsive viewports, interaction-state coverage, screenshot evidence, owner-only downloads, and real single-file/Vite verification | 251 backend and 20 frontend unit tests passed with 1 sandbox integration skipped; eight screenshots per static Phase 2 run, two quality evaluations, production build, and Ruff clean |
 | 2026-10-30 | SYS-05 product-capability honesty | Deterministic scope assessment, required capability gate, early limitation visibility, actionable UI warnings, full regressions, and Mini-Twitter capability canary | 255 backend and 21 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |
 | 2026-10-30 | LLM continuation and document-JSON robustness | Added bounded continuation for `length` responses, fragment reassembly, literal-newline JSON normalization, and usage/repair regressions | 257 backend tests passed with 1 sandbox integration skipped; two quality evaluations and Ruff clean |
+| 2026-10-30 | AppSpec presentation compatibility | Normalized provider aliases and empty-state forms before strict validation, made canonical prompt keys explicit, and avoided unnecessary repair calls | 259 backend tests passed with 1 sandbox integration skipped; two quality evaluations and Ruff clean |

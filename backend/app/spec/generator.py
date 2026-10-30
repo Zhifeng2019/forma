@@ -32,6 +32,34 @@ def _current_document(current_spec: AppSpec | dict | None) -> dict | None:
     return copy.deepcopy(current_spec)
 
 
+def _normalize_presentation(frontend: dict) -> None:
+    presentation = frontend.get('presentation')
+    if not isinstance(presentation, dict):
+        return
+    aliases = {
+        'primary_headline': 'headline',
+        'entity_label_singular': 'entity_label',
+        'entity_label_plural': 'entity_plural_label',
+        'primary_create_label': 'create_label',
+        'empty_state_title': 'empty_title',
+        'empty_state_message': 'empty_message',
+    }
+    for alias, canonical in aliases.items():
+        if alias in presentation:
+            if presentation.get(canonical) in {None, ''}:
+                presentation[canonical] = presentation[alias]
+            presentation.pop(alias)
+    empty_state = presentation.pop('empty_state', None)
+    if isinstance(empty_state, dict):
+        for source, target in (
+            ('title', 'empty_title'), ('message', 'empty_message'), ('description', 'empty_message'),
+        ):
+            if source in empty_state and presentation.get(target) in {None, ''}:
+                presentation[target] = empty_state[source]
+    elif isinstance(empty_state, str) and presentation.get('empty_message') in {None, ''}:
+        presentation['empty_message'] = empty_state
+
+
 def _normalize_proposal(
     proposal: dict, name: str, source_format: str, backend_mode: str,
 ) -> AppSpec:
@@ -50,6 +78,7 @@ def _normalize_proposal(
     document['dependencies'] = default_dependencies(source_format)
     document['manifest'] = default_manifest(source_format, backend_mode)
     frontend = document.get('frontend') if isinstance(document.get('frontend'), dict) else {}
+    _normalize_presentation(frontend)
     frontend['state_adapter'] = 'forma-api' if backend_mode == 'fastapi' else 'browser-local'
     document['frontend'] = frontend
     acceptance = document.get('acceptance')
@@ -166,7 +195,7 @@ User feedback: {feedback or 'None'}
 Current AppSpec to preserve and refine: {current_json}
 
 Return one AppSpec proposal with product, entities, api, frontend, and acceptance sections.
-In frontend.presentation, provide a concise headline, singular/plural entity labels, a primary create label, and helpful empty-state copy. Do not repeat the long workflow in the headline.
+In frontend.presentation, use only these keys: headline, entity_label, entity_plural_label, create_label, empty_title, empty_message. Provide concise product-facing copy and do not repeat the long workflow in the headline.
 Use exactly one entity with one to eight non-ID fields. An integer id field is optional.
 Supported field kinds: string, text, integer, number, boolean, date, datetime, uuid.
 Supported constraints: minLength/maxLength for strings and minimum/maximum for numbers.
