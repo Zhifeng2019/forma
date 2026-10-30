@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -242,4 +243,67 @@ def test_presentation_aliases_are_normalized_without_repair(monkeypatch, empty_s
     assert presentation.empty_message == expected_message
     serialized = presentation.model_dump(mode='json', exclude_none=True)
     assert not {'primary_headline', 'entity_label_singular', 'entity_label_plural', 'primary_create_label', 'empty_state'} & serialized.keys()
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('as_json_string', [False, True])
+def test_value_wrapped_proposal_and_product_aliases_are_normalized(monkeypatch, as_json_string):
+    document = proposal()
+    document['product'] = {
+        'name': 'Provider-selected name',
+        'description': 'A concise product brief',
+        'workflow': 'Complete the primary user workflow',
+    }
+    calls = []
+
+    async def complete(*_args):
+        calls.append(True)
+        return {'value': json.dumps(document) if as_json_string else document}
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Requested App', 'Authoritative brief', 'multi-file', 'fastapi',
+    ))
+    assert spec.product.name == 'Requested App'
+    assert spec.product.brief == 'A concise product brief'
+    assert spec.product.primary_workflow == 'Complete the primary user workflow'
+    assert len(calls) == 1
+
+
+def test_missing_product_fields_use_authoritative_brief_without_repair(monkeypatch):
+    document = proposal()
+    document['product'].pop('brief')
+    document['product'].pop('primary_workflow')
+    calls = []
+
+    async def complete(*_args):
+        calls.append(True)
+        return {'value': document}
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Requested App', 'Authoritative user brief', 'multi-file', 'fastapi',
+    ))
+    assert spec.product.brief == 'Authoritative user brief'
+    assert spec.product.primary_workflow == 'Authoritative user brief'
+    assert len(calls) == 1
+
+
+def test_api_metadata_and_missing_names_are_normalized_without_repair(monkeypatch):
+    document = proposal()
+    for operation in document['api']:
+        operation.pop('name')
+        operation['description'] = 'Descriptive text that is not part of the executable contract'
+    calls = []
+
+    async def complete(*_args):
+        calls.append(True)
+        return document
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Requested App', 'A shared workflow', 'multi-file', 'fastapi',
+    ))
+    assert all(not hasattr(operation, 'description') for operation in spec.api)
+    assert all(operation.name == 'Descriptive text that is not part of the executable contract' for operation in spec.api)
     assert len(calls) == 1

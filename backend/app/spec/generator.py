@@ -60,15 +60,69 @@ def _normalize_presentation(frontend: dict) -> None:
         presentation['empty_message'] = empty_state
 
 
+def _looks_like_appspec(value) -> bool:
+    return isinstance(value, dict) and bool({'product', 'entities', 'frontend', 'api'} & value.keys())
+
+
+def _unwrap_proposal(proposal):
+    """Unwrap common provider envelopes without accepting arbitrary contract fields."""
+    document = copy.deepcopy(proposal)
+    for _attempt in range(4):
+        if isinstance(document, str):
+            try:
+                document = json.loads(document)
+            except json.JSONDecodeError:
+                return document
+        if not isinstance(document, dict):
+            return document
+        if 'value' in document:
+            nested = document['value']
+            if isinstance(nested, str):
+                try:
+                    nested = json.loads(nested)
+                except json.JSONDecodeError:
+                    nested = None
+            if _looks_like_appspec(nested):
+                document = nested
+                continue
+            if _looks_like_appspec(document):
+                document = {key: value for key, value in document.items() if key != 'value'}
+        if _looks_like_appspec(document):
+            return document
+        for key in ('result', 'data', 'proposal', 'appspec', 'output', 'response'):
+            if key in document:
+                document = document[key]
+                break
+        else:
+            return document
+    return document
+
+
 def _normalize_proposal(
     proposal: dict, name: str, source_format: str, backend_mode: str,
+    brief: str = '', current_spec: AppSpec | dict | None = None,
 ) -> AppSpec:
-    document = copy.deepcopy(proposal)
+    document = _unwrap_proposal(proposal)
     document.pop('type', None)
     document['schema_version'] = '1.0'
     document['compiler_version'] = '1.0'
+    current = _current_document(current_spec) or {}
+    current_product = current.get('product', {}) if isinstance(current.get('product'), dict) else {}
     product = document.get('product') if isinstance(document.get('product'), dict) else {}
+    for alias, canonical in (
+        ('description', 'brief'), ('workflow', 'primary_workflow'),
+        ('primaryWorkflow', 'primary_workflow'), ('user_workflow', 'primary_workflow'),
+    ):
+        if alias in product:
+            if product.get(canonical) in {None, ''}:
+                product[canonical] = product[alias]
+            product.pop(alias)
     product['name'] = name
+    if product.get('brief') in {None, ''}:
+        product['brief'] = current_product.get('brief') or brief
+    if product.get('primary_workflow') in {None, ''}:
+        product['primary_workflow'] = current_product.get('primary_workflow') or product['brief']
+    product['primary_workflow'] = product['primary_workflow'][:2000]
     document['product'] = product
     document['architecture'] = {
         'backend_mode': backend_mode,
@@ -92,6 +146,16 @@ def _normalize_proposal(
                 item['kind'] = item['kind'].lower()
             normalized.append(item)
         document['acceptance'] = normalized
+    if isinstance(document.get('api'), list):
+        normalized_api = []
+        for operation in document['api']:
+            if not isinstance(operation, dict):
+                continue
+            item = {key: operation[key] for key in ('name', 'method', 'path', 'entity', 'errors') if key in operation}
+            if not item.get('name'):
+                item['name'] = str(operation.get('description') or f'{item.get("method", "GET")} {item.get("path", "/api")}')[:120]
+            normalized_api.append(item)
+        document['api'] = normalized_api
     if backend_mode == 'static':
         document['api'] = []
         acceptance = document.get('acceptance') if isinstance(document.get('acceptance'), list) else []
@@ -157,14 +221,16 @@ def _local_proposal(
     else:
         document = current
         if backend_mode == 'fastapi' and not document.get('api'):
-            previous = _validate_proposal(_normalize_proposal(document, name, source_format, 'static'))
+            previous = _validate_proposal(_normalize_proposal(
+                document, name, source_format, 'static', brief, current_spec,
+            ))
             entity = document['entities'][0]['name']
             collection = entity_contract(previous).collection
             document['api'] = default_api(backend_mode, collection, entity)
-        document = _normalize_proposal(document, name, source_format, backend_mode).model_dump(
+        document = _normalize_proposal(document, name, source_format, backend_mode, brief, current_spec).model_dump(
             mode='json', exclude_none=True,
         )
-    document = _normalize_proposal(document, name, source_format, backend_mode).model_dump(
+    document = _normalize_proposal(document, name, source_format, backend_mode, brief, current_spec).model_dump(
         mode='json', exclude_none=True,
     )
     if backend_mode == 'fastapi' and not any(check.get('kind') == 'api' for check in document['acceptance']):
@@ -194,7 +260,7 @@ Implementation phase: {phase}/3
 User feedback: {feedback or 'None'}
 Current AppSpec to preserve and refine: {current_json}
 
-Return one AppSpec proposal with product, entities, api, frontend, and acceptance sections.
+Return one AppSpec proposal directly at the top level with product, entities, api, frontend, and acceptance sections. Do not wrap it in value, result, data, response, or output. product must include brief and primary_workflow.
 In frontend.presentation, use only these keys: headline, entity_label, entity_plural_label, create_label, empty_title, empty_message. Provide concise product-facing copy and do not repeat the long workflow in the headline.
 Use exactly one entity with one to eight non-ID fields. An integer id field is optional.
 Supported field kinds: string, text, integer, number, boolean, date, datetime, uuid.
@@ -221,7 +287,9 @@ async def propose_appspec(
     prompt = proposal_prompt(name, brief, source_format, backend_mode, phase, feedback, current_spec)
     proposal = await complete_with_schema(supervised_provider, SYSTEM, prompt, proposal_json_schema(), 'forma_appspec')
     try:
-        return _validate_proposal(_normalize_proposal(proposal, name, source_format, backend_mode))
+        return _validate_proposal(_normalize_proposal(
+            proposal, name, source_format, backend_mode, brief, current_spec,
+        ))
     except AppSpecError as exc:
         repair = prompt + (
             f'\n\nThe previous valid JSON proposal failed AppSpec validation: {exc}\n'
@@ -233,4 +301,6 @@ async def propose_appspec(
         corrected = await complete_with_schema(
             supervised_provider, SYSTEM, repair, proposal_json_schema(), 'forma_appspec',
         )
-        return _validate_proposal(_normalize_proposal(corrected, name, source_format, backend_mode))
+        return _validate_proposal(_normalize_proposal(
+            corrected, name, source_format, backend_mode, brief, current_spec,
+        ))

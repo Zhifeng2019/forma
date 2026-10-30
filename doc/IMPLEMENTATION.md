@@ -12,7 +12,14 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — AppSpec presentation compatibility
+## Latest completed increment — Robust AppSpec planning boundary
+
+- [x] **Transport-envelope handling.** Common provider wrappers, including `value` objects and JSON strings, are unwrapped before AppSpec normalization without accepting arbitrary contract fields.
+- [x] **Authoritative product defaults.** Missing `brief` and `primary_workflow` values come from the user brief or current AppSpec, while product aliases normalize deterministically.
+- [x] **Executable API normalization.** Descriptive operation metadata is filtered, and missing display names derive from descriptions or `METHOD path` without changing API behavior.
+- [x] **Real-provider verification.** The configured DeepSeek provider successfully returns and normalizes a Mini-Twitter AppSpec with one post entity and five API operations; full backend and generation-quality suites also pass.
+
+## Earlier completed increment — AppSpec presentation compatibility
 
 - [x] **Provider alias normalization.** Known presentation variants map to canonical AppSpec fields before validation, including singular/plural labels, primary headline/create labels, and object or string empty states.
 - [x] **Strict-schema preservation.** Canonical values win, unknown fields still fail closed, and valid aliases no longer consume the bounded semantic-repair attempt.
@@ -334,3 +341,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-30 | SYS-05 product-capability honesty | Deterministic scope assessment, required capability gate, early limitation visibility, actionable UI warnings, full regressions, and Mini-Twitter capability canary | 255 backend and 21 frontend unit tests passed with 1 sandbox integration skipped; two quality evaluations, production build, and Ruff clean |
 | 2026-10-30 | LLM continuation and document-JSON robustness | Added bounded continuation for `length` responses, fragment reassembly, literal-newline JSON normalization, and usage/repair regressions | 257 backend tests passed with 1 sandbox integration skipped; two quality evaluations and Ruff clean |
 | 2026-10-30 | AppSpec presentation compatibility | Normalized provider aliases and empty-state forms before strict validation, made canonical prompt keys explicit, and avoided unnecessary repair calls | 259 backend tests passed with 1 sandbox integration skipped; two quality evaluations and Ruff clean |
+| 2026-10-30 | Robust AppSpec planning boundary | Unwrapped provider envelopes, supplied authoritative product defaults, normalized API metadata/names, and verified a real Mini-Twitter DeepSeek proposal | 263 backend tests passed with 1 sandbox integration skipped; real DeepSeek proposal, two quality evaluations, and Ruff clean |
