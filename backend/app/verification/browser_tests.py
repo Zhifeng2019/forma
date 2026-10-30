@@ -57,6 +57,7 @@ const openApp = async page => {{
   if (!PREVIEW_URL) throw new Error('APP_PREVIEW_URL is required')
   await page.goto(PREVIEW_URL)
   await expect(page.locator('main')).toBeVisible()
+  await expect(page.locator('.loading-state')).toHaveCount(0)
 }}
 '''
     tests = ['''

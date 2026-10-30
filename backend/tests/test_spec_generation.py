@@ -307,3 +307,29 @@ def test_api_metadata_and_missing_names_are_normalized_without_repair(monkeypatc
     assert all(not hasattr(operation, 'description') for operation in spec.api)
     assert all(operation.name == 'Descriptive text that is not part of the executable contract' for operation in spec.api)
     assert len(calls) == 1
+
+
+def test_entity_labels_and_descriptive_metadata_are_normalized(monkeypatch):
+    document = proposal()
+    entity = document['entities'][0]
+    entity['label'] = 'Task'
+    entity['plural_label'] = 'Tasks'
+    entity['description'] = 'Entity description'
+    for field in entity['fields']:
+        field['label'] = 'Display label'
+        field['description'] = 'Field description'
+    calls = []
+
+    async def complete(*_args):
+        calls.append(True)
+        return document
+
+    monkeypatch.setattr('app.spec.generator.complete_with_schema', complete)
+    spec = asyncio.run(propose_appspec(
+        {'name': 'Provider'}, 'Task App', 'A task workflow', 'multi-file', 'fastapi',
+    ))
+    assert spec.frontend.presentation.entity_label == 'task'
+    assert spec.frontend.presentation.entity_plural_label == 'tasks'
+    assert not hasattr(spec.entities[0], 'label') and not hasattr(spec.entities[0], 'plural_label')
+    assert all(not hasattr(field, 'label') and not hasattr(field, 'description') for field in spec.entities[0].fields)
+    assert len(calls) == 1

@@ -60,6 +60,33 @@ def _normalize_presentation(frontend: dict) -> None:
         presentation['empty_message'] = empty_state
 
 
+def _normalize_entities(document: dict, frontend: dict) -> None:
+    entities = document.get('entities')
+    if not isinstance(entities, list):
+        return
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+        label = entity.pop('label', None)
+        plural_label = entity.pop('plural_label', None)
+        entity.pop('description', None)
+        if label or plural_label:
+            presentation = frontend.get('presentation')
+            if not isinstance(presentation, dict):
+                presentation = {}
+                frontend['presentation'] = presentation
+            if label and presentation.get('entity_label') in {None, ''}:
+                presentation['entity_label'] = str(label).lower()
+            if plural_label and presentation.get('entity_plural_label') in {None, ''}:
+                presentation['entity_plural_label'] = str(plural_label).lower()
+        fields = entity.get('fields')
+        if isinstance(fields, list):
+            for field in fields:
+                if isinstance(field, dict):
+                    field.pop('label', None)
+                    field.pop('description', None)
+
+
 def _looks_like_appspec(value) -> bool:
     return isinstance(value, dict) and bool({'product', 'entities', 'frontend', 'api'} & value.keys())
 
@@ -133,6 +160,7 @@ def _normalize_proposal(
     document['manifest'] = default_manifest(source_format, backend_mode)
     frontend = document.get('frontend') if isinstance(document.get('frontend'), dict) else {}
     _normalize_presentation(frontend)
+    _normalize_entities(document, frontend)
     frontend['state_adapter'] = 'forma-api' if backend_mode == 'fastapi' else 'browser-local'
     document['frontend'] = frontend
     acceptance = document.get('acceptance')

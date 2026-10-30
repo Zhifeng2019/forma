@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-30
 
-**Current focus:** Owner retry of AppSpec planning and design generation
+**Current focus:** Owner review of the successful end-to-end Mini-Twitter retry
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -12,7 +12,15 @@ This is the persistent implementation record for the approved sequence:
 
 Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
 
-## Latest completed increment — Robust AppSpec planning boundary
+## Latest completed increment — Full Mini-Twitter retry and runtime verification fixes
+
+- [x] **Entity metadata normalization.** Entity labels map into presentation metadata, and descriptive entity/field fields no longer block valid AppSpec planning.
+- [x] **Deterministic browser loading.** Acceptance waits for initial data, delayed-loading evidence uses `route.fetch()` and delayed fulfillment, and validation counts are measured after initial loading completes.
+- [x] **Seeded-state verification.** Interaction checks clear existing records before asserting the empty state, covering both seeded FastAPI and unseeded static applications.
+- [x] **Port-stable restart.** Preview restarts reuse the previous port after health recovery, preventing clients from retrying the stopped port.
+- [x] **End-to-end proof.** Real DeepSeek discovery, design, AppSpec planning, and three build versions completed. Seventeen of eighteen required checks passed; only the intentional capability limitation blocked publication, with no other failures or cleanup errors. Full regressions and quality evaluations pass.
+
+## Earlier completed increment — Robust AppSpec planning boundary
 
 - [x] **Transport-envelope handling.** Common provider wrappers, including `value` objects and JSON strings, are unwrapped before AppSpec normalization without accepting arbitrary contract fields.
 - [x] **Authoritative product defaults.** Missing `brief` and `primary_workflow` values come from the user brief or current AppSpec, while product aliases normalize deterministically.
@@ -342,3 +350,4 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 | 2026-10-30 | LLM continuation and document-JSON robustness | Added bounded continuation for `length` responses, fragment reassembly, literal-newline JSON normalization, and usage/repair regressions | 257 backend tests passed with 1 sandbox integration skipped; two quality evaluations and Ruff clean |
 | 2026-10-30 | AppSpec presentation compatibility | Normalized provider aliases and empty-state forms before strict validation, made canonical prompt keys explicit, and avoided unnecessary repair calls | 259 backend tests passed with 1 sandbox integration skipped; two quality evaluations and Ruff clean |
 | 2026-10-30 | Robust AppSpec planning boundary | Unwrapped provider envelopes, supplied authoritative product defaults, normalized API metadata/names, and verified a real Mini-Twitter DeepSeek proposal | 263 backend tests passed with 1 sandbox integration skipped; real DeepSeek proposal, two quality evaluations, and Ruff clean |
+| 2026-10-30 | Full Mini-Twitter retry and runtime verification fixes | Normalized entity metadata, made browser loading deterministic, handled seeded state, and preserved preview ports across restart | 265 backend tests passed with 1 sandbox integration skipped; real end-to-end retry passed 17/18 checks with only the intentional capability block; two quality evaluations and Ruff clean |

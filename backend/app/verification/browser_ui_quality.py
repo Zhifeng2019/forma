@@ -59,9 +59,10 @@ test('desktop tablet and mobile layouts do not overflow', async ({ page }) => {
   await page.route('**/*', async route => {
     const request = route.request()
     if (request.method() === 'GET' && new URL(request.url()).pathname.includes(COLLECTION_KEY)) {
+      const response = await route.fetch()
       await new Promise(resolve => setTimeout(resolve, 500))
-    }
-    await route.continue()
+      await route.fulfill({ response })
+    } else await route.continue()
   })
   const refreshing = page.getByRole('button', { name: 'Refresh data' }).click()
   await expect(page.locator('.loading-state')).toBeVisible()
@@ -82,6 +83,10 @@ test('desktop tablet and mobile layouts do not overflow', async ({ page }) => {
         tests.append('''
 test('empty populated success loading and error states have evidence', async ({ page }) => {
   await openApp(page)
+  for (let index = 0; index < 20 && await page.locator('.item').count(); index++) {
+    await page.locator('.item').first().getByRole('button', { name: DELETE_LABEL }).click()
+    await expect(page.locator('.alert.success')).toBeVisible()
+  }
   await expect(page.locator('.empty-state')).toBeVisible()
   await capture(page, 'browser.interaction-states-empty')
   for (const field of FIELDS) {

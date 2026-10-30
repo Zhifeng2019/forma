@@ -102,6 +102,7 @@ class RuntimeManager:
         source_format: str = 'single-file',
         files: dict[str, str] | None = None,
         spec_hash: str | None = None,
+        preferred_port: int | None = None,
     ) -> ManagedRuntime:
         key = self._key(project_id, version, channel)
         source_files = files if files is not None else {
@@ -152,7 +153,9 @@ class RuntimeManager:
                 environment = await self._ensure_environment(
                     project_id, runtime_requirements(requirements), telemetry,
                 )
-                return await self._start(key, project_id, version, channel, environment, source_dir, telemetry)
+                return await self._start(
+                    key, project_id, version, channel, environment, source_dir, telemetry, preferred_port,
+                )
         finally:
             self._starting.discard(key)
 
@@ -315,6 +318,7 @@ class RuntimeManager:
         python: Path,
         source_dir: Path,
         telemetry: dict | None = None,
+        preferred_port: int | None = None,
     ) -> ManagedRuntime:
         _root, environment, _source, work = self._paths(project_id, version)
         context = current_job_context()
@@ -340,7 +344,7 @@ class RuntimeManager:
             spec_hash=telemetry.get('spec_hash'), source_hash=telemetry.get('source_hash'),
         )
         tool_run_id = launch.id if launch else f'runtime-start:{key}'
-        port = self._free_port()
+        port = preferred_port or self._free_port()
         logs = self._logs.setdefault(key, deque(maxlen=120))
         logs.append(f'Starting FastAPI version {version} ({channel})')
         launcher = Path(__file__).with_name('runtime_launcher.py')
@@ -519,9 +523,14 @@ class RuntimeManager:
         source_format: str = 'single-file', files: dict[str, str] | None = None,
     ) -> dict:
         key = self._key(project_id, version, 'preview')
+        previous = self._runtimes.get(key)
+        preferred_port = previous.port if previous else None
         async with self._lock(project_id):
             await self._stop(key)
-        await self.ensure(project_id, version, 'preview', source, requirements, source_format, files)
+        await self.ensure(
+            project_id, version, 'preview', source, requirements, source_format, files,
+            preferred_port=preferred_port,
+        )
         return await self.status(project_id, version, check_health=True)
 
     async def stop_project(self, project_id: str, channel: str | None = None, keep_version: int | None = None) -> None:

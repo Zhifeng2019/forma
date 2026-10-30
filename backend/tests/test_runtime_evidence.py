@@ -1,5 +1,6 @@
 import asyncio
 import errno
+from types import SimpleNamespace
 import uuid
 
 from fastapi import HTTPException
@@ -104,6 +105,37 @@ def test_restart_api_uses_explicit_version_and_defaults_to_current(monkeypatch):
     assert explicit == {'version': 4, 'healthy': True}
     assert default == {'version': 2, 'healthy': True}
     assert calls == [4, 2]
+
+
+def test_restart_reuses_previous_preview_port(monkeypatch):
+    from app.runtime import runtime_manager
+    project_id = 'a' * 32
+    key = runtime_manager._key(project_id, 3, 'preview')
+    runtime_manager._runtimes[key] = SimpleNamespace(port=4567)
+    observed = {}
+
+    async def stop(_key):
+        return None
+
+    async def ensure(_project, _version, _channel, _source, _requirements, _format, _files,
+                     preferred_port=None):
+        observed['port'] = preferred_port
+        return SimpleNamespace(port=preferred_port)
+
+    async def status(_project, _version, check_health=False):
+        return {'healthy': check_health, 'version': _version}
+
+    monkeypatch.setattr(runtime_manager, '_stop', stop)
+    monkeypatch.setattr(runtime_manager, 'ensure', ensure)
+    monkeypatch.setattr(runtime_manager, 'status', status)
+    try:
+        result = asyncio.run(runtime_manager.restart(
+            project_id, 3, 'source', 'requirements', 'multi-file', {},
+        ))
+    finally:
+        runtime_manager._runtimes.pop(key, None)
+    assert observed['port'] == 4567
+    assert result == {'healthy': True, 'version': 3}
 
 
 def test_cleanup_failure_preserves_checks_and_blocks_publish(monkeypatch):
