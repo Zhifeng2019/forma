@@ -20,6 +20,7 @@ from .config import settings
 from .engine import validate_project_id
 from .features import FeatureFlag, feature_enabled
 from .frontend_builder import PackageBuildError, write_source_files
+from .jobs.cloud_sync import exclude_from_cloud_sync, first_offloaded_file
 from .jobs.context import current_job_context
 from .jobs.file_cleanup import remove_tree
 from .jobs.idempotency import canonical_input_hash
@@ -189,6 +190,9 @@ class RuntimeManager:
 
         try:
             root.mkdir(parents=True, exist_ok=True)
+            if first_offloaded_file(environment) is not None:
+                # Evicted placeholders stall every import until cloud sync downloads them; rebuild instead.
+                remove_tree(environment)
             env = self._clean_environment(work, environment)
             if not python.exists():
                 created = True
@@ -197,6 +201,7 @@ class RuntimeManager:
                     'create the application Python environment', env, work, telemetry=step('venv'),
                 )
             # Generated apps must never inherit the studio or machine site-packages.
+            exclude_from_cloud_sync(environment)
             venv_config = environment / 'pyvenv.cfg'
             if venv_config.exists():
                 venv_config.write_text(venv_config.read_text().replace(

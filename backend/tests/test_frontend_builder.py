@@ -1,13 +1,14 @@
 import asyncio
+import hashlib
 import uuid
 
 import pytest
 
 from app.config import settings
 from app.frontend_builder import (
-    PackageBuildError, ensure_frontend_build, staging_directory, version_directory,
+    PackageBuildError, ensure_frontend_build, ensure_node_environment, staging_directory, version_directory,
 )
-from app.source_packages import local_source_package
+from app.source_packages import frontend_package_json, local_source_package
 
 
 def fake_node_environment(monkeypatch):
@@ -107,3 +108,49 @@ def test_changed_source_is_rejected_without_starting_a_build(monkeypatch):
     assert calls == []
     assert app.read_text() == 'locally changed source'
     assert not staging_directory(project_id, 1).exists()
+
+
+def offloaded_node_environment(monkeypatch, user_id):
+    root = settings.data_path / 'node' / f'user_{user_id}'
+    (root / 'node_modules' / '.bin').mkdir(parents=True)
+    (root / 'node_modules' / '.bin' / 'vite').write_text('')
+    (root / 'node_modules' / 'stale.js').write_text('placeholder')
+    (root / '.forma-dependencies.sha256').write_text(hashlib.sha256(frontend_package_json().encode()).hexdigest())
+    monkeypatch.setattr('app.frontend_builder._node_binaries', lambda: ('node', 'npm'))
+    monkeypatch.setattr('app.frontend_builder.executable_version', lambda _binary: 'test')
+    monkeypatch.setattr(
+        'app.frontend_builder.first_offloaded_file',
+        lambda path: path / 'stale.js' if (path / 'stale.js').exists() else None,
+    )
+    return root
+
+
+def test_offloaded_node_environment_is_reinstalled(monkeypatch):
+    root = offloaded_node_environment(monkeypatch, 940110)
+    calls = []
+
+    async def install(command, cwd, _env, _timeout, _action, **_kwargs):
+        calls.append(command)
+        modules = cwd / 'node_modules'
+        (modules / '.bin').mkdir(parents=True)
+        (modules / '.bin' / 'vite').write_text('')
+        for package in ('react', 'react-dom', 'lucide-react', '@vitejs/plugin-react'):
+            (modules / package).mkdir(parents=True)
+            (modules / package / 'package.json').write_text('{}')
+        return ''
+
+    monkeypatch.setattr('app.frontend_builder._run', install)
+    assert asyncio.run(ensure_node_environment(940110)) == root
+    assert calls and calls[0][1] == 'install'
+    assert not (root / 'node_modules' / 'stale.js').exists()
+
+
+def test_healthy_node_environment_is_reused(monkeypatch):
+    root = offloaded_node_environment(monkeypatch, 940111)
+    (root / 'node_modules' / 'stale.js').unlink()
+
+    async def unexpected(*_args, **_kwargs):
+        raise AssertionError('A healthy environment must not be reinstalled')
+
+    monkeypatch.setattr('app.frontend_builder._run', unexpected)
+    assert asyncio.run(ensure_node_environment(940111)) == root

@@ -9,6 +9,7 @@ import shutil
 import zipfile
 
 from .config import settings
+from .jobs.cloud_sync import exclude_from_cloud_sync, first_offloaded_file
 from .jobs.file_cleanup import remove_tree
 from .jobs.idempotency import canonical_input_hash
 from .jobs.processes import executable_version, run_process
@@ -123,6 +124,7 @@ def _environment(root: Path, node_modules: Path, node_binary: str) -> dict[str, 
     (root / 'tmp').mkdir(parents=True, exist_ok=True)
     cache = settings.data_path / 'cache' / 'npm'
     cache.mkdir(parents=True, exist_ok=True)
+    exclude_from_cloud_sync(cache)
     return {
         'PATH': f'{node_modules / ".bin"}:{Path(node_binary).parent}:/usr/local/bin:/usr/bin:/bin',
         'HOME': str(root), 'TMPDIR': str(root / 'tmp'),
@@ -157,13 +159,23 @@ async def ensure_node_environment(user_id: int) -> Path:
         dependencies = frontend_dependencies()
         vite = root / 'node_modules' / '.bin' / 'vite'
         marker = root / '.forma-dependencies.sha256'
-        if vite.exists() and marker.exists() and marker.read_text() == digest:
+        offloaded = first_offloaded_file(root / 'node_modules')
+        if vite.exists() and marker.exists() and marker.read_text() == digest and offloaded is None:
+            exclude_from_cloud_sync(root)
             return _sync_step(
                 'node.environment', executable_version(node),
                 {'package_hash': digest, 'dependency_versions': dependencies}, lambda: root,
                 provenance={'package_hash': digest, 'cache_hit': True, 'dependency_versions': dependencies},
             )
+        if offloaded is not None:
+            # Evicted placeholders stall every read until cloud sync downloads them; reinstall instead.
+            _remove_tree(root / 'node_modules')
+            marker.unlink(missing_ok=True)
+        cache = settings.data_path / 'cache' / 'npm'
+        if first_offloaded_file(cache) is not None:
+            _remove_tree(cache)
         root.mkdir(parents=True, exist_ok=True)
+        exclude_from_cloud_sync(root)
         (root / 'package.json').write_text(package_json)
         env = _environment(root, root / 'node_modules', node)
         await _run(
