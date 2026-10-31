@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
@@ -5,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from .config import settings
 from .database import init_databases
+from .jobs.recovery import recover_all_workspaces, recovery_loop
 from .deployment_registry import deployment_artifacts, get_deployment
 from .llm import GenerationError
 from .api import cancel_generation_jobs, forward_runtime, router
@@ -16,7 +18,11 @@ init_databases()
 
 @asynccontextmanager
 async def lifespan(_app):
+    recover_all_workspaces(startup=True)
+    recovery = asyncio.create_task(recovery_loop())
     yield
+    recovery.cancel()
+    await asyncio.gather(recovery, return_exceptions=True)
     await cancel_generation_jobs()
     await runtime_manager.stop_all()
 
