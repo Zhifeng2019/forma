@@ -3,8 +3,9 @@ import { defineConfig } from '@playwright/test'
 const backendPort = Number(process.env.FORMA_TEST_BACKEND_PORT || 8000)
 const frontendPort = Number(process.env.FORMA_TEST_FRONTEND_PORT || 5173)
 const backendUrl = `http://127.0.0.1:${backendPort}`
-const frontendUrl = `http://127.0.0.1:${frontendPort}`
-const isolated = Boolean(process.env.FORMA_TEST_BACKEND_PORT || process.env.FORMA_TEST_FRONTEND_PORT)
+const production = process.env.FORMA_TEST_PRODUCTION === '1'
+const frontendUrl = production ? backendUrl : `http://127.0.0.1:${frontendPort}`
+const isolated = production || Boolean(process.env.FORMA_TEST_BACKEND_PORT || process.env.FORMA_TEST_FRONTEND_PORT)
 const reuseExistingServer = !isolated
 
 export default defineConfig({
@@ -19,10 +20,10 @@ export default defineConfig({
       cwd: '../backend', url: `${backendUrl}/api/health`, reuseExistingServer, timeout: 30_000,
       env: { STUDIO_BASE_URL: backendUrl, APPS_BASE_URL: `http://apps.localhost:${backendPort}`, CORS_ORIGINS: frontendUrl },
     },
-    {
+    ...(!production ? [{
       command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort}`,
       cwd: '.', url: frontendUrl, reuseExistingServer, timeout: 30_000,
       env: { FORMA_BACKEND_URL: backendUrl },
-    },
+    }] : []),
   ],
 })

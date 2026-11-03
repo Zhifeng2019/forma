@@ -26,7 +26,7 @@ test('plan feedback stays in review until the user starts the first build', asyn
     await expect(page.locator('.documents-view nav button.selected, .documents-view nav button.active')).toContainText('plan.md')
     await expect(page.locator('.approval-bar')).toContainText('Feedback revises it')
     const feedback = 'Phase 1 must show invoice currency without conversion.'
-    await page.getByPlaceholder('Ask for a change or share feedback…').fill(feedback)
+    await page.getByPlaceholder('Ask a question or request a change…').fill(feedback)
     await page.locator('.send-button').click()
     await expect(page.locator('.markdown-body')).toContainText(feedback)
     await expect(page.getByRole('button', { name: 'Build phase 1' })).toBeEnabled()

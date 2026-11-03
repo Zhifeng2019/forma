@@ -16,6 +16,7 @@ import sys
 import time
 
 from .backend_engine import runtime_requirements
+from .application_auth import APPLICATION_REQUEST_HEADERS
 from .config import settings
 from .engine import validate_project_id
 from .features import FeatureFlag, feature_enabled
@@ -489,18 +490,18 @@ class RuntimeManager:
         content_type: str,
         source_format: str = 'single-file',
         files: dict[str, str] | None = None,
-        authorization: str = '',
+        application_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         runtime = await self.ensure(project_id, version, channel, source, requirements, source_format, files)
         if path.startswith('/') or '..' in path.split('/'):
             raise RuntimeLaunchError('Invalid generated API path')
         target = f'http://127.0.0.1:{runtime.port}/api/{path}'
         runtime.last_used = time.monotonic()
-        headers = {'Accept': 'application/json'}
+        headers = {'accept': 'application/json'}
         if content_type:
-            headers['Content-Type'] = content_type
-        if authorization:
-            headers['Authorization'] = authorization
+            headers['content-type'] = content_type
+        headers.update({name.lower(): value for name, value in (application_headers or {}).items()
+                        if name.lower() in APPLICATION_REQUEST_HEADERS})
         try:
             async with httpx.AsyncClient(timeout=settings.runtime_request_timeout, trust_env=False) as client:
                 return await client.request(method, target, params=query, content=body, headers=headers)

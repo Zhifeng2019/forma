@@ -1,11 +1,15 @@
 from pathlib import Path
 import ipaddress
+import json
+import logging
+import os
 import re
 from urllib.parse import urlsplit
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
+ENV_FILE = ROOT / '.env'
 
 
 def normalized_origin(value: str) -> str:
@@ -25,7 +29,8 @@ def normalized_origin(value: str) -> str:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=ROOT / '.env', extra='ignore')
+    # The same absolute file is used from the repo root, backend, or development launcher.
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra='ignore')
     data_dir: str = str(ROOT.parent / 'data')
     secret_key: str = 'forma-local-development-secret-change-in-production'
     cors_origins: str = 'http://localhost:5173,http://127.0.0.1:5173'
@@ -82,3 +87,27 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def configuration_report(config: Settings = settings, env_file: Path = ENV_FILE) -> dict:
+    """A small allowlist of startup diagnostics; never include secret or provider values."""
+    legacy_env = env_file.parent.parent / '.env'
+    inherited = {key.lower() for key in os.environ}
+    return {
+        'environment_file': str(env_file),
+        'environment_file_exists': env_file.is_file(),
+        'ignored_environment_files': [str(legacy_env)] if legacy_env.is_file() else [],
+        'process_overrides': sorted(key.upper() for key in Settings.model_fields if key.lower() in inherited),
+        'generation_path': 'llm-source (local demo when no model is selected)',
+        'features': {key.upper(): getattr(config, key) for key in (
+            'durable_jobs_v1', 'acceptance_gate_v1', 'sandbox_v1',
+        )},
+    }
+
+
+def log_configuration() -> None:
+    logger = logging.getLogger('uvicorn.error')
+    report = configuration_report()
+    logger.info('Forma configuration: %s', json.dumps(report, sort_keys=True))
+    if report['ignored_environment_files']:
+        logger.warning('Root .env is ignored. Keep settings in %s; process variables take precedence.', ENV_FILE)

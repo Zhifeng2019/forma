@@ -32,6 +32,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   const [project, setProject] = useState<Project | null>(null)
   const [tab, setTab] = useState<Tab>('preview')
   const [busy, setBusy] = useState(false)
+  const [messagePending, setMessagePending] = useState(false)
   const [eventConnected, setEventConnected] = useState(false)
   const [cancelPending, setCancelPending] = useState(false)
   const [message, setMessage] = useState('')
@@ -92,10 +93,12 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
       } finally { refreshing = false }
     }
     void refresh()
-    const timer = window.setInterval(() => { void refresh() }, eventConnected ? 30_000 : 1500)
+    // Read-only conversations do not emit generation-job events.
+    const timer = window.setInterval(() => { void refresh() }, eventConnected && project.active_job ? 30_000 : 1500)
     return () => { active = false; window.clearInterval(timer) }
   }, [id, busy, eventConnected, project?.status, project?.stage, project?.auto_mode, project?.verification_running])
   useEffect(() => { if (project?.status !== 'working') setMigrationTarget(null) }, [project?.status])
+  useEffect(() => { if (!busy && project?.status !== 'working') setMessagePending(false) }, [busy, project?.status])
   useEffect(() => {
     if (project?.stage === 'build' && !project.current_version && project.status === 'ready'
         && project.artifacts.some(artifact => artifact.path === 'plan.md')) {
@@ -155,7 +158,8 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   const document = project.artifacts.find(a => a.path === docPath)
   const isWorking = Boolean(busy || project.status === 'working' || project.verification_running)
   const isCancelling = cancelPending || ['cancel_requested', 'cancelling'].includes(project.active_job?.status || '')
-  const currentWorkingLabel = isCancelling ? 'Cancelling…' : project.verification_running ? 'Verifying your application…' : migrationTarget ? `Migrating to ${migrationTarget === 'fastapi' ? 'FastAPI' : 'frontend only'}…` : workingLabel(project.stage)
+  const respondingToMessage = (messagePending || project.messages.at(-1)?.role === 'user') && !project.active_job
+  const currentWorkingLabel = isCancelling ? 'Cancelling…' : project.verification_running ? 'Verifying your application…' : migrationTarget ? `Migrating to ${migrationTarget === 'fastapi' ? 'FastAPI' : 'frontend only'}…` : respondingToMessage ? 'Responding to your message…' : workingLabel(project.stage)
   const publishUrl = project.published_url || ''
 
   const advance = async () => {
@@ -199,7 +203,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
       created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
     }
     setProject(current => current ? { ...current, messages: [...current.messages, optimistic] } : current)
-    setMessage(''); setSelection(null); setBusy(true); setError('')
+    setMessage(''); setSelection(null); setMessagePending(true); setBusy(true); setError('')
     try {
       const next = await api<Project>(`/projects/${id}/messages`, { method: 'POST', body: JSON.stringify({ content, selection: selected, defer: true }) })
       setProject(next)
@@ -241,9 +245,9 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
     </header>
     <div className="stage-track">{stages.map((item, index) => <button key={item.id} className={`${index === project.stage_index ? 'active' : ''} ${index < project.stage_index ? 'complete' : ''}`} onClick={() => { const artifact = project.artifacts.find(a => a.stage === item.id); if (artifact) { setDocPath(artifact.path); setTab('documents') } }} disabled={index > project.stage_index}><span>{index < project.stage_index ? <Check size={12} /> : index + 1}</span>{item.short}{index < stages.length - 1 && <i />}</button>)}</div>
     <div className="builder-body">
-      <aside className="agent-panel"><header><div className="agent-title"><span><Sparkles size={16} /></span><div><strong>Product team</strong><small><i className={isWorking ? 'working' : ''} />{isWorking ? 'Working on your app' : 'Ready to collaborate'}</small></div></div><button className="icon-button"><MoreIcon /></button></header>
+      <aside className="agent-panel"><header><div className="agent-title"><span><Sparkles size={16} /></span><div><strong>Product team</strong><small><i className={isWorking ? 'working' : ''} />{isWorking ? (respondingToMessage ? 'Responding to your message' : 'Working on your app') : 'Ready to collaborate'}</small></div></div><button className="icon-button"><MoreIcon /></button></header>
         <div className="chat-scroll"><div className="context-card"><span>BUILDING</span><strong>{project.name}</strong><p>{project.brief}</p></div>{project.messages.map(msg => <div key={msg.id} className={`chat-message ${msg.role}`} >{msg.role === 'agent' && <span className="agent-avatar"><Sparkles size={13} /></span>}<div><span className="message-author">{msg.role === 'agent' ? 'Forma' : 'You'}<time>{timeLabel(msg.created_at)}</time></span><p>{msg.content}</p>{msg.kind === 'stage' && msg.role === 'agent' && <span className="message-receipt"><CheckCircle2 size={12} />Workspace updated</span>}</div></div>)}{isWorking && <div className="chat-message agent"><span className="agent-avatar"><Sparkles size={13} /></span><div><span className="message-author">Forma</span><div className="thinking"><i /><i /><i /><span>{currentWorkingLabel}</span></div></div></div>}<div ref={chatEnd} /></div>
-        <div className="composer-wrap">{selection && <div className="selection-pill"><MousePointer2 size={13} /><span>{selection.selector}</span><button onClick={() => setSelection(null)}><X size={12} /></button></div>}<form className="composer" onSubmit={send}><textarea value={message} onChange={e => setMessage(e.target.value)} placeholder={selection ? 'What should change here?' : 'Ask for a change or share feedback…'} rows={3} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(e) } }} /><div><button type="button" className={`icon-button ${picking ? 'active' : ''}`} title="Select an element in the preview" onClick={() => { setTab('preview'); setPicking(!picking) }}><Paperclip size={16} /></button><span>↵ to send</span><button className="send-button" disabled={!message.trim() || isWorking}><Send size={15} /></button></div></form><p className="composer-note">Forma can make mistakes. Review before publishing.</p></div>
+        <div className="composer-wrap">{selection && <div className="selection-pill"><MousePointer2 size={13} /><span>{selection.selector}</span><button onClick={() => setSelection(null)}><X size={12} /></button></div>}<form className="composer" onSubmit={send}><textarea value={message} onChange={e => setMessage(e.target.value)} placeholder={selection ? 'Ask about this element or request a change…' : 'Ask a question or request a change…'} rows={3} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(e) } }} /><div><button type="button" className={`icon-button ${picking ? 'active' : ''}`} title="Select an element in the preview" onClick={() => { setTab('preview'); setPicking(!picking) }}><Paperclip size={16} /></button><span>↵ to send</span><button className="send-button" disabled={!message.trim() || isWorking}><Send size={15} /></button></div></form><p className="composer-note">Forma can make mistakes. Review before publishing.</p></div>
       </aside>
       <main className="work-panel"><header className="work-tabs"><div><button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Monitor size={15} />Preview</button><button className={tab === 'documents' ? 'active' : ''} onClick={() => setTab('documents')}><FileText size={15} />Documents<span>{project.artifacts.filter(a => a.path.endsWith('.md')).length}</span></button>{(project.verification_available || project.appspec) && <button className={tab === 'contract' ? 'active' : ''} onClick={() => setTab('contract')}><FileJson2 size={15} />Contract</button>}{(project.verification_available || project.appspec) && <button className={tab === 'verification' ? 'active' : ''} onClick={() => setTab('verification')}><ShieldCheck size={15} />Verification</button>}<button className={tab === 'source' ? 'active' : ''} onClick={() => setTab('source')}><Code2 size={15} />Source</button>{project.backend_mode === 'fastapi' && <button className={tab === 'server' ? 'active' : ''} onClick={() => setTab('server')}><Server size={15} />Server</button>}<button className={tab === 'activity' ? 'active' : ''} onClick={() => setTab('activity')}><Activity size={15} />Activity</button></div>{tab === 'preview' && html && <div className="preview-tools"><span className="device-switch"><button className={device === 'desktop' ? 'active' : ''} onClick={() => setDevice('desktop')} title="Desktop"><Laptop size={15} /></button><button className={device === 'tablet' ? 'active' : ''} onClick={() => setDevice('tablet')} title="Tablet"><Tablet size={15} /></button><button className={device === 'mobile' ? 'active' : ''} onClick={() => setDevice('mobile')} title="Mobile"><Smartphone size={15} /></button></span><button className={`icon-button ${picking ? 'active picker-on' : ''}`} onClick={() => setPicking(!picking)} title="Select element to edit"><MousePointer2 size={16} /></button><button className="icon-button" onClick={() => setPreviewKey(k => k + 1)} title="Refresh preview"><RefreshCw size={15} /></button></div>}</header>
         {error && <div className="builder-error">{error}<button onClick={() => setError('')}><X size={14} /></button></div>}

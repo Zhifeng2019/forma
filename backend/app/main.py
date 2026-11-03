@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
-from .config import settings
+from .config import log_configuration, settings
 from .database import init_databases
 from .jobs.recovery import recover_all_workspaces, recovery_loop
 from .deployment_registry import deployment_artifacts, get_deployment
@@ -14,12 +14,14 @@ from .api import preview_asset, preview_owner, preview_project
 from .app_origins import ApplicationOriginMiddleware
 from .runtime import inject_runtime_bootstrap, runtime_manager
 from .frontend_builder import PackageBuildError, ensure_frontend_build, frontend_asset_path
+from .studio_static import StudioStaticFiles
 
 init_databases()
 
 
 @asynccontextmanager
 async def lifespan(_app):
+    log_configuration()
     recover_all_workspaces(startup=True)
     recovery = asyncio.create_task(recovery_loop())
     yield
@@ -116,5 +118,4 @@ async def hosted_asset(project_id: str, path: str):
 
 frontend_dist = Path(__file__).resolve().parent.parent.parent / 'frontend' / 'dist'
 if frontend_dist.exists():
-    from fastapi.staticfiles import StaticFiles
-    app.mount('/', StaticFiles(directory=frontend_dist, html=True), name='frontend')
+    app.mount('/', StudioStaticFiles(directory=frontend_dist), name='frontend')

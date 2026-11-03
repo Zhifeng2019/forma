@@ -13,7 +13,9 @@ from .verification.review import latest_model_review
 from .security import hash_password, verify_password, create_token, encrypt_secret, decrypt_secret
 from .security import create_preview_token, decode_preview_token
 from .app_origins import application_origin, preview_url, published_url, studio_origins
+from .application_auth import APPLICATION_REQUEST_HEADERS, application_cookie
 from .generation_context import read_version_context
+from .conversation import MessageDecision, UNAVAILABLE, resolve_message
 from .engine import add_message, add_event, generate_stage, migrate_architecture, revise_document, safe_selector
 from .llm import GenerationError
 from .backend_engine import BACKEND_PATH, REQUIREMENTS_PATH
@@ -362,8 +364,8 @@ async def create_project(body: ProjectInput, user=Depends(current_user)):
                             # Feedback applies to what the owner reviewed; they resume by approving.
                             with workspace_db(user['id']) as db:
                                 db.execute('UPDATE projects SET auto_mode=0 WHERE id=?', (project_id,))
-                                add_message(db, project_id, 'agent', 'Autopilot paused so your feedback is applied '
-                                            'to the current step. Approve it when you are ready to continue.', 'chat')
+                                add_message(db, project_id, 'agent', 'Autopilot paused for your message. '
+                                            'Approve the current step when you are ready to continue.', 'chat')
                             break
                         # Claim the step before yielding so feedback cannot slip in and land after it.
                         with workspace_db(user['id']) as db:
@@ -552,6 +554,8 @@ async def advance_project(project_id: str, body: StageInput, user=Depends(curren
 @router.post('/projects/{project_id}/messages')
 async def send_message(project_id: str, body: MessageInput, user=Depends(current_user)):
     project = owned_project(user['id'], project_id)
+    if not body.content.strip():
+        raise HTTPException(422, 'Enter a question or describe a change')
     if project['status'] == 'working':
         raise HTTPException(409, 'The agent is already working')
     selection = safe_selector(body.selection)
@@ -559,6 +563,7 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
         _autopilot[project_id] = True
     with workspace_db(user['id']) as db:
         add_message(db, project_id, 'user', body.content + selection, metadata={'selection': body.selection or {}})
+        db.execute("UPDATE projects SET status='working',updated_at=CURRENT_TIMESTAMP WHERE id=?", (project_id,))
     with control_db() as db:
         from .engine import provider_for_user
         provider = provider_for_user(db, user['id'])
@@ -567,15 +572,32 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
         async with project_lock(project_id):
             # An autopilot step may have finished while this waited; act on the stage the owner now sees.
             current = owned_project(user['id'], project_id)
-            builds_application = current['stage'] in {'build', 'review'} and current['current_version'] > 0
+            try:
+                decision = await resolve_message(user['id'], current, provider, body.content, body.selection)
+            except asyncio.CancelledError:
+                with workspace_db(user['id']) as db:
+                    add_message(db, project_id, 'agent', 'The reply was interrupted. No changes were made; '
+                                'please send your message again.', 'answer')
+                    db.execute("UPDATE projects SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                               (project['status'], project_id))
+                raise
+            except GenerationError:
+                # Routing or answering failures must never fall through to code generation.
+                decision = MessageDecision('answer', UNAVAILABLE)
+            if decision.intent != 'change':
+                with workspace_db(user['id']) as db:
+                    add_message(db, project_id, 'agent', decision.reply, 'answer',
+                                metadata={'intent': decision.intent, 'version': current['current_version']})
+                    db.execute("UPDATE projects SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                               (project['status'], project_id))
+                return
+            builds_application = current['stage'] in {'build', 'review', 'deploy'} and current['current_version'] > 0
             if builds_application:
                 await generate_stage(user['id'], project_id, provider, body.content + selection, revise=True)
             else:
                 await revise_document(user['id'], project_id, provider, body.content)
 
     if body.defer:
-        with workspace_db(user['id']) as db:
-            db.execute("UPDATE projects SET status='working',updated_at=CURRENT_TIMESTAMP WHERE id=?", (project_id,))
         schedule_generation(user['id'], project_id, run_message())
     else:
         await run_message()
@@ -657,11 +679,16 @@ def runtime_artifacts(user_id: int, project_id: str, version: int) -> tuple[str,
     return contents[BACKEND_PATH], contents[REQUIREMENTS_PATH], source_format, contents
 
 
-def runtime_response(upstream: httpx.Response) -> Response:
+def runtime_response(upstream: httpx.Response, channel: str = 'public') -> Response:
     headers = {'Cache-Control': 'no-store'}
     if upstream.headers.get('content-type'):
         headers['Content-Type'] = upstream.headers['content-type']
-    return Response(content=upstream.content, status_code=upstream.status_code, headers=headers)
+    response = Response(content=upstream.content, status_code=upstream.status_code, headers=headers)
+    for value in upstream.headers.get_list('set-cookie'):
+        cookie = application_cookie(value, preview=channel == 'preview', https=settings.apps_base_url.startswith('https://'))
+        if cookie:
+            response.headers.append('set-cookie', cookie)
+    return response
 
 
 async def forward_runtime(
@@ -681,13 +708,13 @@ async def forward_runtime(
             project_id, version, channel, source, requirements, request.method, path,
             request.url.query, body, request.headers.get('content-type', ''),
             source_format=source_format, files=files,
-            authorization=request.headers.get('authorization', ''),
+            application_headers={name: request.headers[name] for name in APPLICATION_REQUEST_HEADERS if name in request.headers},
         )
     except RuntimeLaunchError as exc:
         detail = ('The application backend is temporarily unavailable. Please try again shortly.'
                   if channel == 'public' else str(exc))
         raise HTTPException(503, detail) from exc
-    return runtime_response(upstream)
+    return runtime_response(upstream, channel)
 
 
 @router.get('/projects/{project_id}/runtime')

@@ -36,7 +36,7 @@ test('a user can shape, build, revise, and publish an application', async ({ pag
     await new Promise<void>(resolve => { releaseMessage = resolve })
     await route.continue()
   })
-  await page.getByPlaceholder('Ask for a change or share feedback…').fill(feedback)
+  await page.getByPlaceholder('Ask a question or request a change…').fill(feedback)
   await page.locator('.send-button').click()
   try {
     await expect(page.locator('.chat-message.user').getByText(feedback, { exact: true })).toBeVisible()
@@ -68,7 +68,7 @@ test('a user can shape, build, revise, and publish an application', async ({ pag
   await page.getByTitle('Select element to edit').click()
   await frame.getByRole('heading', { name: 'Make good work feel effortless.' }).click()
   await expect(page.locator('.selection-pill')).toBeVisible()
-  await page.getByPlaceholder('What should change here?').fill('Keep this headline clear and confident.')
+  await page.getByPlaceholder('Ask about this element or request a change…').fill('Keep this headline clear and confident.')
   await page.locator('.send-button').click()
   await expect(page.getByText('Your feedback has been applied in a new version.', { exact: false }).last()).toBeVisible()
 

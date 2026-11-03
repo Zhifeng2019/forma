@@ -123,7 +123,7 @@ async def generate_stage(
             'source_format': project['source_format'],
             'feedback': feedback,
             'revise': revise,
-            'planning_inputs': planning_fingerprint(db, project, inherit=stage in {'build', 'review'}),
+            'planning_inputs': planning_fingerprint(db, project, inherit=stage in {'build', 'review', 'deploy'}),
         }
     await run_generation_job(
         user_id, project_id, stage, action, input_data,
@@ -222,7 +222,7 @@ async def _advance(
             # Approving the release accepts the reviewed version as-is; it must not regenerate it.
             next_stage, index = 'deploy', 5
             message = 'The release is approved. Publish it when you are ready.'
-        elif stage in {'build', 'review'}:
+        elif stage in {'build', 'review'} or (stage == 'deploy' and revise):
             # Feedback refines the current phase; only explicit approval advances it.
             phase = max(1, project['phase_index']) if revise else min(3, project['phase_index'] + 1)
             version += 1
@@ -283,8 +283,8 @@ async def _advance(
                           VALUES(?,?,?,?,?,?,?)''',
                        (project_id, version, version_label, feedback or STAGE_LABELS[stage], backend_mode, source_format,
                         json.dumps(inputs, ensure_ascii=False, sort_keys=True)))
-            next_stage = stage if revise else 'build' if phase < 3 else 'review'
-            index = project['stage_index'] if revise else 3 if phase < 3 else 4
+            next_stage = stage if revise and stage != 'deploy' else 'build' if phase < 3 else 'review'
+            index = STAGES.index(next_stage)
             db.execute('UPDATE projects SET phase_index=? WHERE id=?', (phase, project_id))
             message = ('Your feedback has been applied in a new version.' if revise else
                        f'Phase {phase} is implemented and the preview has been updated.')
@@ -294,7 +294,7 @@ async def _advance(
             raise GenerationError('This stage cannot be advanced.')
         db.execute('UPDATE projects SET stage=?,stage_index=?,current_version=?,status=?,updated_at=? WHERE id=?',
                    (next_stage, index, version, 'ready', now(), project_id))
-        completion = f'Feedback applied to version {version}' if revise and stage in {'build', 'review'} else f'{STAGE_LABELS[stage]} completed'
+        completion = f'Feedback applied to version {version}' if revise and stage in {'build', 'review', 'deploy'} else f'{STAGE_LABELS[stage]} completed'
         add_event(db, project_id, completion, 'success')
         add_message(db, project_id, 'agent', message, 'stage', {'stage': next_stage, 'version': version})
 
