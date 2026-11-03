@@ -21,7 +21,7 @@ const project: Project = {
   stage: 'review', stage_index: 4, phase_index: 3, status: 'ready', auto_mode: false, current_version: 1,
   backend_mode: 'static', backend_reason: 'Browser state', backend_enabled: false, source_format: 'single-file',
   published_version: null, created_at: '', updated_at: '', messages: [], versions: [], events: [], artifacts: [],
-  appspec_enabled: true, appspec: { spec: {} } as unknown as Project['appspec'], appspec_valid: true,
+  acceptance_gate_enabled: true, verification_available: true, appspec: { spec: {} } as unknown as Project['appspec'], appspec_valid: true,
   verification: report, verification_running: false,
 }
 
@@ -80,7 +80,7 @@ describe('VerificationPanel', () => {
       },
     })
     const html = renderToStaticMarkup(<VerificationPanel
-      project={{ ...project, verification: reviewed, specialist_workers_enabled: true }} onVerify={() => {}} busy={false}
+      project={{ ...project, verification: reviewed, acceptance_gate_enabled: true }} onVerify={() => {}} busy={false}
     />)
     expect(html).toContain('Verification failed')
     expect(html).toContain('Advisory model review')

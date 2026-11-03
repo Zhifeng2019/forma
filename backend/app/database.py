@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE TABLE IF NOT EXISTS versions (
  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, version INTEGER NOT NULL,
  label TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', backend_mode TEXT NOT NULL DEFAULT 'static',
- source_format TEXT NOT NULL DEFAULT 'single-file',
+ source_format TEXT NOT NULL DEFAULT 'single-file', generation_context TEXT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(project_id, version)
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -195,6 +195,9 @@ def workspace_for(user_id: int):
             db.execute("ALTER TABLE versions ADD COLUMN source_format TEXT NOT NULL DEFAULT 'single-file'")
             db.execute('''UPDATE versions SET source_format=(
                           SELECT projects.source_format FROM projects WHERE projects.id=versions.project_id)''')
+        if 'generation_context' not in version_columns:
+            # Old releases have no recorded input history; do not infer it retroactively.
+            db.execute('ALTER TABLE versions ADD COLUMN generation_context TEXT')
         usage_columns = {row['name'] for row in db.execute('PRAGMA table_info(usage_ledger)')}
         for name, definition in {
             'usage_status': "TEXT NOT NULL DEFAULT 'unavailable'",

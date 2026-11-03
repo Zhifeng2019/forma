@@ -1,3 +1,4 @@
+from fixtures.preview import open_preview
 import time
 
 from fastapi.testclient import TestClient
@@ -55,7 +56,7 @@ def test_complete_product_lifecycle():
     assert project['current_version'] == 4
     assert 'Selected element: #newItem' in project['messages'][-2]['content']
 
-    response = client.get(f'/api/projects/{project_id}/preview?access_token={token}')
+    response = open_preview(client, project_id, token)
     assert response.status_code == 200
     assert 'forma-picker' in response.text
 
@@ -69,7 +70,7 @@ def test_complete_product_lifecycle():
 
     other = register('other@example.com')
     assert client.get(f'/api/projects/{project_id}', headers=auth(other['token'])).status_code == 404
-    assert client.get(f'/api/projects/{project_id}/preview?access_token={other["token"]}').status_code == 404
+    assert open_preview(client, project_id, other['token']).status_code == 404
 
 
 def test_admin_provider_and_user_controls():

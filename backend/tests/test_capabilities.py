@@ -2,13 +2,12 @@ import asyncio
 import json
 import uuid
 
+from fixtures.archived_appspec import archived_package, spec_artifacts
+
 from app.api import project_payload
 from app.config import Settings
 from app.database import workspace_db, workspace_for
 from app.spec.capabilities import assess_capabilities
-from app.spec.compiler import compile_package
-from app.spec.defaults import local_default_appspec
-from app.spec.service import spec_artifacts
 from app.verification.manifest import acceptance_artifacts
 from app.verification.runner import verify_package
 
@@ -17,13 +16,6 @@ BROAD_BRIEF = (
     'Users post images, comment, reply, follow, like or dislike, and share posts. '
     'Posts expire after one day and updates arrive over websocket.'
 )
-
-
-def broad_spec():
-    spec = local_default_appspec('Social Product', BROAD_BRIEF, 'multi-file', 'static')
-    document = spec.model_dump(mode='json', exclude_none=True)
-    document['product']['primary_workflow'] = BROAD_BRIEF
-    return document
 
 
 def project_from_package(user_id, package):
@@ -45,7 +37,7 @@ def project_from_package(user_id, package):
 
 
 def test_crud_scope_is_not_presented_as_full_product_coverage():
-    spec = local_default_appspec('Task App', 'Create and complete focused tasks.', 'multi-file', 'static')
+    spec = archived_package().spec
     assessment = assess_capabilities(spec)
     assert assessment['status'] == 'crud_scope'
     assert assessment['requirements'] == []
@@ -53,7 +45,7 @@ def test_crud_scope_is_not_presented_as_full_product_coverage():
 
 
 def test_broad_brief_produces_deterministic_limitations_and_manifest_check():
-    package = compile_package(broad_spec(), phase=2)
+    package = archived_package(brief=BROAD_BRIEF)
     artifacts = acceptance_artifacts(package)
     assessment = json.loads(artifacts['acceptance/capabilities.json'])
     assert assessment['status'] == 'limited'
@@ -69,9 +61,7 @@ def test_broad_brief_produces_deterministic_limitations_and_manifest_check():
 
 def test_supported_crud_passes_capability_gate():
     user_id = 990100
-    package = compile_package(local_default_appspec(
-        'Simple Tasks', 'Create and complete focused tasks.', 'multi-file', 'static',
-    ), phase=2)
+    package = archived_package()
     project_id = project_from_package(user_id, package)
     report = asyncio.run(verify_package(
         user_id, project_id, 1,
@@ -85,7 +75,7 @@ def test_supported_crud_passes_capability_gate():
 
 def test_limited_scaffold_is_blocked_and_visible_before_verification():
     user_id = 990101
-    package = compile_package(broad_spec(), phase=2)
+    package = archived_package(brief=BROAD_BRIEF)
     project_id = project_from_package(user_id, package)
     early = project_payload(user_id, project_id)
     assert early['capability']['status'] == 'limited'
@@ -99,7 +89,7 @@ def test_limited_scaffold_is_blocked_and_visible_before_verification():
     result = next(item for item in report['checks'] if item['id'] == 'capability.declared-scope')
     assert result['status'] == 'blocked'
     assert 'limited scaffold' in result['error']
-    assert 'Narrow the product scope or extend the generator' in result['error']
+    assert 'Build a new version implementing the requested capabilities' in result['error']
     assert report['can_publish'] is False
     assert 'capability.declared-scope' in report['summary']['required_failures']
     assert report['capability']['status'] == 'limited'

@@ -1,9 +1,10 @@
 """Assemble deterministic acceptance artifacts and provenance manifests."""
 
 import json
+from typing import Protocol
 
 from ..spec.capabilities import assess_capabilities
-from ..spec.compiler import CompiledPackage
+from ..spec.types import AppSpec
 from ..spec.schema import APPSPEC_SCHEMA_VERSION, COMPILER_VERSION
 from .api_tests import generate_api_tests
 from .browser_tests import generate_browser_tests
@@ -12,7 +13,17 @@ from .migration_tests import generate_migration_tests
 from .security_tests import generate_security_tests
 
 
-def acceptance_artifacts(compiled: CompiledPackage) -> dict[str, str]:
+class VerificationPackage(Protocol):
+    """An existing source package and its stored contract; never synthesizes application code."""
+
+    spec: AppSpec
+    files: dict[str, str]
+    manifest: dict
+    spec_hash: str
+    source_hash: str
+
+
+def acceptance_artifacts(compiled: VerificationPackage) -> dict[str, str]:
     generation = compiled.manifest.get('generation', {'mode': 'scoped-source'})
     context = AcceptanceContext(
         compiled.spec, compiled.source_hash, generation.get('phase', 1), compiled.files,

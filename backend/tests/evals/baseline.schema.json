@@ -106,8 +106,16 @@
           "type": "boolean"
         },
         "appspec_v1": {
-          "title": "Appspec V1",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Appspec V1"
         },
         "durable_jobs_v1": {
           "title": "Durable Jobs V1",
@@ -118,15 +126,21 @@
           "type": "boolean"
         },
         "specialist_workers_v1": {
-          "title": "Specialist Workers V1",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Specialist Workers V1"
         }
       },
       "required": [
         "durable_jobs_v1",
-        "appspec_v1",
         "acceptance_gate_v1",
-        "specialist_workers_v1",
         "sandbox_v1"
       ],
       "title": "FeatureFlags",

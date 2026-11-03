@@ -1,0 +1,297 @@
+{
+  "files": {
+    "backend/app/__init__.py": "\"\"\"Generated application backend.\"\"\"\n",
+    "backend/app/api.py": "from contextlib import asynccontextmanager\nfrom fastapi import FastAPI, HTTPException\nfrom .database import database, initialize\nfrom .models import CompletionInput, ItemInput\n\n@asynccontextmanager\nasync def lifespan(_app):\n    initialize()\n    yield\n\napp = FastAPI(title=\"Legacy Acceptance\", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)\n\n@app.get(\"/api/health\")\ndef health():\n    return {\"status\": \"ok\", \"service\": \"Legacy Acceptance\"}\n\n@app.get(\"/api/items\")\ndef list_items():\n    with database() as connection:\n        rows = connection.execute(\"SELECT id,title,completed,created_at FROM items ORDER BY completed,id DESC\").fetchall()\n    return {\"items\": [dict(row) for row in rows]}\n\n@app.post(\"/api/items\", status_code=201)\ndef create_item(body: ItemInput):\n    title = body.title.strip()\n    if not title:\n        raise HTTPException(422, \"Give this item a clear title\")\n    with database() as connection:\n        cursor = connection.execute(\"INSERT INTO items(title) VALUES(?)\", (title,))\n        row = connection.execute(\"SELECT id,title,completed,created_at FROM items WHERE id=?\", (cursor.lastrowid,)).fetchone()\n    return dict(row)\n\n@app.patch(\"/api/items/{item_id}\")\ndef complete_item(item_id: int, body: CompletionInput):\n    with database() as connection:\n        cursor = connection.execute(\"UPDATE items SET completed=? WHERE id=?\", (int(body.completed), item_id))\n        if not cursor.rowcount:\n            raise HTTPException(404, \"Item not found\")\n        row = connection.execute(\"SELECT id,title,completed,created_at FROM items WHERE id=?\", (item_id,)).fetchone()\n    return dict(row)\n\n@app.delete(\"/api/items/{item_id}\", status_code=204)\ndef delete_item(item_id: int):\n    with database() as connection:\n        cursor = connection.execute(\"DELETE FROM items WHERE id=?\", (item_id,))\n        if not cursor.rowcount:\n            raise HTTPException(404, \"Item not found\")\n",
+    "backend/app/database.py": "from contextlib import contextmanager\nimport sqlite3\n\nDATABASE = \"app.db\"\n\n@contextmanager\ndef database():\n    connection = sqlite3.connect(DATABASE)\n    connection.row_factory = sqlite3.Row\n    try:\n        yield connection\n        connection.commit()\n    finally:\n        connection.close()\n\ndef initialize():\n    with database() as connection:\n        connection.execute(\"CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)\")\n        if connection.execute(\"SELECT COUNT(*) FROM items\").fetchone()[0] == 0:\n            connection.executemany(\"INSERT INTO items(title,completed) VALUES(?,?)\", [(\"Shape the first useful workflow\",0),(\"Celebrate a small release\",1)])\n",
+    "backend/app/models.py": "from pydantic import BaseModel, Field\n\nclass ItemInput(BaseModel):\n    title: str = Field(min_length=1, max_length=160)\n\nclass CompletionInput(BaseModel):\n    completed: bool\n",
+    "backend/main.py": "from app.api import app\n",
+    "backend/requirements.txt": "fastapi==0.139.0\nuvicorn==0.50.0\npydantic==2.13.4\nemail-validator==2.3.0\n",
+    "frontend/index.html": "<!doctype html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Legacy Acceptance</title></head><body><div id=\"root\"></div><script type=\"module\" src=\"/src/main.jsx\"></script></body></html>\n",
+    "frontend/package.json": "{\n  \"name\": \"forma-generated-application\",\n  \"private\": true,\n  \"version\": \"1.0.0\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"dev\": \"vite\",\n    \"build\": \"vite build\",\n    \"preview\": \"vite preview\"\n  },\n  \"dependencies\": {\n    \"react\": \"19.3.1\",\n    \"react-dom\": \"19.3.1\",\n    \"lucide-react\": \"0.468.0\",\n    \"vite\": \"6.4.5\",\n    \"@vitejs/plugin-react\": \"4.7.0\"\n  }\n}\n",
+    "frontend/src/App.jsx": "import { useCallback, useEffect, useState } from 'react'\nimport Workspace from './components/Workspace.jsx'\nimport { createItem, deleteItem, listItems, updateItem } from './api.js'\n\nexport default function App() {\n  const [items, setItems] = useState([]), [error, setError] = useState(''), [online, setOnline] = useState(false)\n  const refresh = useCallback(async () => { try { const data = await listItems(); setItems(data); setOnline(true); setError('') } catch (reason) { setOnline(false); setError(reason.message) } }, [])\n  useEffect(() => { refresh() }, [refresh])\n  const act = async action => { try { await action(); await refresh() } catch (reason) { setError(reason.message) } }\n  return <main className=\"app\"><nav><div className=\"brand\"><span>✦</span>{\"Legacy Acceptance\"}</div><span className={online ? 'status online' : 'status'}><i />{online ? 'Application connected' : 'Connecting…'}</span></nav><section className=\"hero\"><div><small>A FOCUSED PRODUCT WORKSPACE</small><h1>Move good work<br/>forward, together.</h1><p>{\"Preserve a legacy package.\"}</p></div><aside><small>LIVE APPLICATION DATA</small><strong>{items.filter(x => x.completed).length} / {items.length}</strong><span>priorities completed</span></aside></section>{error && <div className=\"error\">{error}</div>}<Workspace items={items} canEdit={false} onRefresh={refresh} onAdd={title => act(() => createItem(title))} onToggle={item => act(() => updateItem(item))} onDelete={item => act(() => deleteItem(item))}/></main>\n}\n",
+    "frontend/src/api.js": "export const listItems = async () => (await Forma.api('/items')).items\nexport const createItem = title => Forma.api('/items', { method: 'POST', body: JSON.stringify({ title }) })\nexport const updateItem = item => Forma.api(`/items/${item.id}`, { method: 'PATCH', body: JSON.stringify({ completed: !item.completed }) })\nexport const deleteItem = item => Forma.api(`/items/${item.id}`, { method: 'DELETE' })\n",
+    "frontend/src/components/Workspace.jsx": "export default function Workspace({ items, canEdit, onRefresh, onAdd, onToggle, onDelete }) {\n  const submit = event => { event.preventDefault(); const input = event.currentTarget.elements.title; if (input.value.trim()) { onAdd(input.value.trim()); input.value = '' } }\n  return <section className=\"workspace\"><article className=\"panel\"><header><h2>Team priorities</h2><span>{items.length} items</span></header><form onSubmit={submit}><input name=\"title\" aria-label=\"New item title\" placeholder=\"What needs to happen next?\" disabled={!canEdit} required /><button disabled={!canEdit}>Add priority</button></form><div className=\"items\">{items.map(item => <div className={item.completed ? 'item done' : 'item'} key={item.id}><button className=\"toggle\" disabled={!canEdit} onClick={() => onToggle(item)} aria-label=\"Toggle completion\">✓</button><span>{item.title}</span>{canEdit && <button className=\"delete\" onClick={() => onDelete(item)} aria-label=\"Delete item\">×</button>}</div>)}</div></article><aside className=\"panel note\"><h2>Built as a package</h2><p>React components, a data adapter, and versioned source are built together into a deployable frontend.</p><button onClick={onRefresh}>Refresh data</button><small>{canEdit ? 'Create, complete, and remove priorities.' : 'Phase 1 establishes the complete package and data view. Approve to enable editing.'}</small></aside></section>\n}\n",
+    "frontend/src/main.jsx": "import React from 'react'\nimport { createRoot } from 'react-dom/client'\nimport App from './App.jsx'\nimport './styles.css'\n\ncreateRoot(document.getElementById('root')).render(<App />)\n",
+    "frontend/src/styles.css": ":root{font-family:Inter,system-ui,sans-serif;color:#1c2823;background:#f5f6f1}*{box-sizing:border-box}body{margin:0}.app{max-width:1120px;margin:auto;padding:28px}nav,.brand,.status,.workspace article header,.item,form{display:flex;align-items:center}nav{justify-content:space-between;margin-bottom:65px}.brand{gap:10px;font-size:20px;font-weight:800}.brand span{background:#1c2823;color:#d9f99d;padding:7px;border-radius:8px}.status{gap:7px;font-size:11px;color:#718078}.status i{width:7px;height:7px;border-radius:50%;background:#d69c3f}.status.online i{background:#36a46c}.hero{display:grid;grid-template-columns:1.3fr .7fr;gap:35px;margin-bottom:38px}.hero small{font-size:10px;font-weight:800;letter-spacing:1.5px;color:#256b4b}.hero h1{font-size:clamp(40px,6vw,66px);line-height:1.03;letter-spacing:-3px;margin:14px 0}.hero p{color:#718078;max-width:560px;line-height:1.7}.hero aside{background:#d9f99d;border-radius:20px;padding:25px}.hero aside strong{display:block;font-size:36px;margin:18px 0 5px}.workspace{display:grid;grid-template-columns:1fr 290px;gap:18px}.panel{background:white;border:1px solid #e2e7df;border-radius:18px;padding:23px}.workspace article header{justify-content:space-between}.workspace h2{font-size:18px}form{gap:9px;margin:20px 0}input{flex:1;min-width:0;padding:11px;border:1px solid #dbe2d8;border-radius:9px}button{cursor:pointer;border:0;border-radius:9px;padding:10px 13px;background:#1c2823;color:white;font:inherit}button:disabled{opacity:.45}.item{gap:12px;padding:14px 0;border-top:1px solid #e8ece4}.item span{flex:1}.item.done span{text-decoration:line-through;color:#829080}.toggle{border:1px solid #bdc9bb;border-radius:50%;width:22px;height:22px;padding:0;background:white;color:#256b4b}.delete{background:transparent;color:#9aa69a;font-size:18px;padding:4px}.note p,.note small{color:#718078;line-height:1.65}.note button{margin:12px 0;background:white;color:#1c2823;border:1px solid #dbe2d8}.error{background:#ffe9df;padding:12px;border-radius:10px;margin-bottom:15px}@media(max-width:740px){.hero,.workspace{grid-template-columns:1fr}.hero h1{letter-spacing:-2px}.app{padding:20px}form{flex-wrap:wrap}input{flex-basis:100%}}\n",
+    "frontend/vite.config.js": "import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()], base: './', build: { outDir: 'dist', emptyOutDir: true } })\n"
+  },
+  "manifest": {
+    "compiler_version": "1.0",
+    "dependencies": {
+      "npm": [
+        "@vitejs/plugin-react",
+        "lucide-react",
+        "react",
+        "react-dom",
+        "vite"
+      ],
+      "python": [
+        "email-validator",
+        "fastapi",
+        "pydantic",
+        "uvicorn"
+      ]
+    },
+    "files": [
+      {
+        "bytes": 37,
+        "owner": "legacy",
+        "path": "backend/app/__init__.py",
+        "sha256": "2e5ee3e88d2ae2a91bae3c530b76c59bacbabc2c367bda55c58f7b09de2f34c4"
+      },
+      {
+        "bytes": 1918,
+        "owner": "legacy",
+        "path": "backend/app/api.py",
+        "sha256": "5f21b1d846da907ace178002d9f75aa4b73de54bea2171d4197d1c09e76cc68f"
+      },
+      {
+        "bytes": 798,
+        "owner": "legacy",
+        "path": "backend/app/database.py",
+        "sha256": "b97b2463e16532df5d9a8a3c6fb10ba7a0cbe98c4e72e124dd9ad1884a091eec"
+      },
+      {
+        "bytes": 175,
+        "owner": "legacy",
+        "path": "backend/app/models.py",
+        "sha256": "e6c7628b71257d1173eeb0b8cc6750dc393df96d87977d13819e4476d4249526"
+      },
+      {
+        "bytes": 24,
+        "owner": "legacy",
+        "path": "backend/main.py",
+        "sha256": "02e6a1d493ec67249470590737b837e319331512f0c810127017d56dec5bdc10"
+      },
+      {
+        "bytes": 73,
+        "owner": "legacy",
+        "path": "backend/requirements.txt",
+        "sha256": "9cbbaef7b3f27e105928d8d94721b0963fca53e3f52600cebbfbb1c69a3f927f"
+      },
+      {
+        "bytes": 258,
+        "owner": "legacy",
+        "path": "frontend/index.html",
+        "sha256": "bcb94853c5e50a2e58f26ed49f46d13a8ebd865d3de47017a86cc6a501dacf6e"
+      },
+      {
+        "bytes": 364,
+        "owner": "legacy",
+        "path": "frontend/package.json",
+        "sha256": "8cc06bc28fd321c14c8301935f38f1f04ff5be691d9a79e2d3cb3ec67a97d1b7"
+      },
+      {
+        "bytes": 1503,
+        "owner": "legacy",
+        "path": "frontend/src/App.jsx",
+        "sha256": "1a96c2245d2770a1f2c935a15e9108d966ecc24d5f49d524e7c734920f00fc11"
+      },
+      {
+        "bytes": 406,
+        "owner": "legacy",
+        "path": "frontend/src/api.js",
+        "sha256": "0c7a4c41182f44e0e36b06878d0b0424b91074eefbae0bb8297adc660a61ff5a"
+      },
+      {
+        "bytes": 1390,
+        "owner": "legacy",
+        "path": "frontend/src/components/Workspace.jsx",
+        "sha256": "99a7b13f115b0981f9017b3f680b9349907f212f21a3e981b2577a46194c5fde"
+      },
+      {
+        "bytes": 183,
+        "owner": "legacy",
+        "path": "frontend/src/main.jsx",
+        "sha256": "8470bd4aae07103dc56b239c6d643f878773f479ca5d47980515485456e5c277"
+      },
+      {
+        "bytes": 2177,
+        "owner": "legacy",
+        "path": "frontend/src/styles.css",
+        "sha256": "3cd7b13792e5265bdeb0c6df5f7bf7ba57835df05853b092a5a146d80a8c13ae"
+      },
+      {
+        "bytes": 188,
+        "owner": "legacy",
+        "path": "frontend/vite.config.js",
+        "sha256": "2ca56c7929c209e06a5bcc1ef5a7b00dbaab479c44dce5fda8ad437bd821a89b"
+      }
+    ],
+    "generation_order": [
+      "backend/app/__init__.py",
+      "backend/app/api.py",
+      "backend/app/database.py",
+      "backend/app/models.py",
+      "backend/main.py",
+      "backend/requirements.txt",
+      "frontend/index.html",
+      "frontend/package.json",
+      "frontend/src/App.jsx",
+      "frontend/src/api.js",
+      "frontend/src/components/Workspace.jsx",
+      "frontend/src/main.jsx",
+      "frontend/src/styles.css",
+      "frontend/vite.config.js"
+    ],
+    "schema_version": "1.0",
+    "source_hash": "3365abd3539c57b687b6fc91df650831d2a151213da04d73483fbd4637f0d9a5",
+    "spec_hash": "8c6b5d8a883dee1172f2b99fd8b822b373ee636c09d534b62423aad493da1ffd"
+  },
+  "source_hash": "3365abd3539c57b687b6fc91df650831d2a151213da04d73483fbd4637f0d9a5",
+  "spec": {
+    "acceptance": [
+      {
+        "kind": "build",
+        "name": "Existing package validation",
+        "target": "frontend/dist/index.html"
+      },
+      {
+        "kind": "api",
+        "name": "Existing runtime health",
+        "target": "/api/health"
+      }
+    ],
+    "api": [
+      {
+        "errors": [],
+        "method": "GET",
+        "name": "Runtime health",
+        "path": "/api/health"
+      }
+    ],
+    "architecture": {
+      "backend_mode": "fastapi",
+      "source_format": "multi-file",
+      "state_ownership": "server"
+    },
+    "compiler_version": "1.0",
+    "dependencies": {
+      "npm": [
+        "react",
+        "react-dom",
+        "lucide-react",
+        "vite",
+        "@vitejs/plugin-react"
+      ],
+      "python": [
+        "fastapi",
+        "uvicorn",
+        "pydantic",
+        "email-validator"
+      ]
+    },
+    "entities": [],
+    "frontend": {
+      "accessibility": [],
+      "components": [
+        "frontend/src/App.jsx",
+        "frontend/src/components/Workspace.jsx",
+        "frontend/src/main.jsx"
+      ],
+      "routes": [],
+      "state_adapter": "forma-api"
+    },
+    "manifest": {
+      "files": [
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "backend/app/__init__.py"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "backend/app/api.py"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "backend/app/database.py"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "backend/app/models.py"
+        },
+        {
+          "max_bytes": 80000,
+          "owner": "legacy",
+          "path": "backend/main.py"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "backend/requirements.txt"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "frontend/index.html"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "frontend/package.json"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "frontend/src/App.jsx"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "frontend/src/api.js"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "frontend/src/components/Workspace.jsx"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "frontend/src/main.jsx"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "frontend/src/styles.css"
+        },
+        {
+          "max_bytes": 140000,
+          "owner": "legacy",
+          "path": "frontend/vite.config.js"
+        }
+      ],
+      "generation_order": [
+        "backend/app/__init__.py",
+        "backend/app/api.py",
+        "backend/app/database.py",
+        "backend/app/models.py",
+        "backend/main.py",
+        "backend/requirements.txt",
+        "frontend/index.html",
+        "frontend/package.json",
+        "frontend/src/App.jsx",
+        "frontend/src/api.js",
+        "frontend/src/components/Workspace.jsx",
+        "frontend/src/main.jsx",
+        "frontend/src/styles.css",
+        "frontend/vite.config.js"
+      ]
+    },
+    "product": {
+      "acceptance_goals": [
+        "Preserve existing application behavior"
+      ],
+      "brief": "Preserve a legacy package.",
+      "name": "Legacy Acceptance",
+      "primary_workflow": "Preserve a legacy package.",
+      "users": []
+    },
+    "schema_version": "1.0"
+  },
+  "spec_hash": "8c6b5d8a883dee1172f2b99fd8b822b373ee636c09d534b62423aad493da1ffd"
+}

@@ -4,16 +4,15 @@ import uuid
 
 import pytest
 
+from fixtures.archived_appspec import archived_package, spec_artifacts
+
 from app.config import Settings
 from app.database import workspace_db, workspace_for
 from app.features import FeatureDisabledError
 from app.frontend_builder import version_directory
 from app.llm import GenerationError
 from app.runtime import runtime_manager
-from app.spec.compiler import compile_package
-from app.spec.defaults import local_default_appspec
 from app.spec.schema import appspec_document
-from app.spec.service import spec_artifacts
 from app.verification.runner import verify_package
 
 
@@ -45,9 +44,7 @@ def dummy_script(status):
 def verification_project(user_id, checks, browser=False):
     workspace_for(user_id)
     project_id = uuid.uuid4().hex
-    package = compile_package(local_default_appspec(
-        'Verifier App', 'Exercise deterministic verification.', 'multi-file', 'static',
-    ))
+    package = archived_package('multi-file', 'static', phase=1)
     with workspace_db(user_id) as db:
         db.execute("INSERT INTO projects(id,name,brief,backend_mode,source_format) VALUES(?,?,?,?,?)",
                    (project_id, 'Verifier App', 'Exercise deterministic verification.', 'static', 'multi-file'))
@@ -103,6 +100,27 @@ def verification_project(user_id, checks, browser=False):
 
 def enabled():
     return Settings(acceptance_gate_v1=True)
+
+
+def test_browser_checks_refresh_preview_grants_after_builds(monkeypatch):
+    from app.security import decode_preview_token
+    from app.verification import runner
+
+    user_id = 950105
+    project_id = verification_project(user_id, [dummy_check(environment=('APP_PREVIEW_URL',))])
+    monkeypatch.setattr(runner, '_base_environment', lambda *_args: {'APP_PREVIEW_URL': 'expired-before-build'})
+    captured = []
+
+    async def execute(_command, _cwd, env, _timeout, _run_id):
+        captured.append(env['APP_PREVIEW_URL'])
+        return 0, ''
+
+    monkeypatch.setattr(runner, '_execute_process', execute)
+    report = asyncio.run(verify_package(user_id, project_id, 1, config=enabled()))
+    assert report['status'] == 'passed'
+    assert len(captured) == 1 and captured[0] != 'expired-before-build'
+    token = captured[0].rstrip('/').rsplit('/', 1)[1]
+    assert decode_preview_token(token, project_id, 1)['sub'] == str(user_id)
 
 
 def test_verification_persists_tool_runs_and_force_retries():
@@ -217,9 +235,7 @@ def test_live_package_verification_with_runtime_and_security():
     user_id = 950107
     workspace_for(user_id)
     project_id = uuid.uuid4().hex
-    package = compile_package(local_default_appspec(
-        'Live Verification', 'Verify a real FastAPI and React package.', 'multi-file', 'fastapi',
-    ), phase=2)
+    package = archived_package('multi-file', 'fastapi', phase=2)
     provenance = spec_artifacts(package)
     with workspace_db(user_id) as db:
         db.execute("INSERT INTO projects(id,name,brief,backend_mode,source_format) VALUES(?,?,?,?,?)",
@@ -263,9 +279,7 @@ def test_single_file_verification_materializes_source_before_build():
     user_id = 950108
     workspace_for(user_id)
     project_id = uuid.uuid4().hex
-    package = compile_package(local_default_appspec(
-        'Single File Verification', 'Verify a single-file static application.', 'single-file', 'static',
-    ), phase=1)
+    package = archived_package('single-file', 'static', phase=1)
     provenance = spec_artifacts(package)
     with workspace_db(user_id) as db:
         db.execute("INSERT INTO projects(id,name,brief,backend_mode,source_format) VALUES(?,?,?,?,?)",

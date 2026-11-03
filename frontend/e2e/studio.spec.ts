@@ -267,12 +267,19 @@ test('a multi-file package builds, runs, and downloads for deployment', async ({
     await expect(page.getByRole('heading', { name: 'Application package' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'frontend/src/App.jsx', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'backend/app/api.py', exact: true })).toBeVisible()
-    const downloadUrl = await page.getByRole('link', { name: 'Download package' }).getAttribute('href')
-    expect(downloadUrl).toContain('/package?access_token=')
-    const archive = await page.request.get(downloadUrl || '')
+    const archivePromise = page.waitForResponse(response => response.url().includes('/package?version='))
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Download package' }).click()
+    const archive = await archivePromise
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toMatch(/\.zip$/)
+    expect(archive.url()).not.toContain('access_token')
     expect(archive.status()).toBe(200)
     expect(archive.headers()['content-type']).toContain('application/zip')
-    expect((await archive.body()).subarray(0, 2).toString()).toBe('PK')
+    const stream = await download.createReadStream()
+    const chunks: Buffer[] = []
+    for await (const chunk of stream!) chunks.push(Buffer.from(chunk))
+    expect(Buffer.concat(chunks).subarray(0, 2).toString()).toBe('PK')
 
     await page.getByRole('button', { name: 'Publish', exact: true }).click()
     await page.getByRole('button', { name: 'Publish application' }).click()

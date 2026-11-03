@@ -1,5 +1,8 @@
 # Forma Studio — AI-Native Application Builder
 
+
+> Historical v1.4 design: the AppSpec compiler and deterministic specialist-worker source generation were retired on 2026-11-03. The current product generates application source through an LLM (or Forma Local for offline demos). Compiler-specific requirements below are historical; see README.md for the active behavior.
+
 **Document status:** Updated to reflect the implemented multi-file package release
 **Current release:** Forma Studio v1.3
 **Product name:** *Forma* comes from the Latin word for form, shape, or structure. It represents turning an unstructured idea into a working product.

@@ -1,4 +1,4 @@
-"""Validated v1 single-entity CRUD contract used by proposals and compilers."""
+"""Validation of the single-entity CRUD contracts stored in historical versions."""
 
 from dataclasses import dataclass
 import re

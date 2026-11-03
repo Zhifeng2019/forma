@@ -2,14 +2,14 @@ import asyncio
 from datetime import datetime, timezone
 import json
 
+from fixtures.archived_appspec import archived_package
+
 from app.database import workspace_db
 from app.frontend_builder import ensure_frontend_build, ensure_node_environment
 from app.jobs.context import reset_job_context
 from app.jobs.leases import lease_next_job
 from app.jobs.service import create_job
 from app.runtime import ManagedRuntime, runtime_manager
-from app.spec.compiler import compile_package
-from app.spec.defaults import local_default_appspec
 from test_tool_runs import activate
 from test_verification_runner import dummy_check, verification_project
 
@@ -25,9 +25,7 @@ def test_frontend_build_staging_promotion_and_cache_provenance():
     user_id = 960400
     project_id = verification_project(user_id, [dummy_check()])
     job_id, attempt = project_attempt(user_id, project_id)
-    package = compile_package(local_default_appspec(
-        'Verifier App', 'Exercise deterministic verification.', 'multi-file', 'static',
-    ))
+    package = archived_package('multi-file', 'static', phase=1)
 
     async def scenario():
         token = activate(user_id, project_id, job_id, attempt)

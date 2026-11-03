@@ -72,10 +72,10 @@ export type Project = {
   backend_mode: BackendMode; backend_reason: string; backend_enabled: boolean; source_format: SourceFormat
   published_version: number | null; published_url?: string; created_at: string; updated_at: string
   messages: Message[]; artifacts: Artifact[]; versions: Version[]; events: StudioEvent[]; active_job?: ActiveJob | null
-  appspec_enabled?: boolean; appspec?: AppSpecEnvelope | null
+  appspec?: AppSpecEnvelope | null
   appspec_valid?: boolean | null; appspec_error?: string | null
   durable_jobs_enabled?: boolean
-  specialist_workers_enabled?: boolean
+  acceptance_gate_enabled?: boolean; verification_available?: boolean
   verification?: VerificationReport | null; verification_running?: boolean
   capability?: CapabilityAssessment | null
 }

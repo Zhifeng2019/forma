@@ -11,13 +11,13 @@ import uuid
 from fastapi import HTTPException
 import pytest
 
+from fixtures.archived_appspec import archived_package
+
 from app.api import get_verification_evidence
 from app.database import workspace_for
 from app.frontend_builder import ensure_frontend_build, version_directory
-from app.spec.compiler import compile_package
 from app.verification.manifest import acceptance_artifacts
 from app.verification.runner import _evidence_for_check
-from test_appspec_frontend_contracts import custom_stress_spec
 from test_verification_runner import verification_project
 
 
@@ -31,7 +31,7 @@ def test_multi_file_ui_quality_checks_generate_screenshot_evidence():
         pytest.skip('npm is required for generated Playwright verification')
     user_id = 980100
     project_id = uuid.uuid4().hex
-    package = compile_package(custom_stress_spec('multi-file', 'static'), phase=2)
+    package = archived_package(fixture='multi-file-presentation')
     artifacts = acceptance_artifacts(package)
     asyncio.run(ensure_frontend_build(user_id, project_id, 1, package.files, package.spec_hash))
     root = version_directory(project_id, 1)

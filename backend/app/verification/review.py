@@ -2,14 +2,10 @@
 
 import json
 
-from ..config import Settings, settings
 from ..database import workspace_db
-from ..features import FeatureFlag, feature_enabled
 from ..jobs.models import JobCancelledError
 from ..jobs.redaction import redact_metadata, redact_output
 from ..llm import complete
-from ..workers.contracts import WorkerRole
-from ..workers.credentials import CredentialBroker
 
 MODEL_REVIEW_PATH = 'acceptance/model-review.json'
 REVIEW_SYSTEM = '''You are an advisory application reviewer. Return only JSON with this shape:
@@ -80,20 +76,14 @@ def _prompt(report: dict) -> str:
 
 async def generate_model_review(
     user_id: int, project_id: str, version: int, report: dict,
-    provider: dict | None, config: Settings | None = None,
+    provider: dict | None,
 ) -> dict:
-    config = config or settings
-    if not feature_enabled(FeatureFlag.SPECIALIST_WORKERS_V1, config):
-        review = _document(report, 'disabled')
-        review['summary'] = 'Advisory model review is not enabled on this studio.'
-        return _persist(user_id, project_id, version, review)
     if not provider:
         review = _document(report, 'unavailable')
         review['summary'] = 'Choose a model provider to request advisory review.'
         return _persist(user_id, project_id, version, review)
     try:
-        supervised = CredentialBroker(provider).for_role(WorkerRole.SUPERVISOR)
-        result = await complete(supervised, REVIEW_SYSTEM, _prompt(report))
+        result = await complete(provider, REVIEW_SYSTEM, _prompt(report))
         review = _document(report, 'completed', provider)
         review['summary'] = redact_output(str(result.get('summary') or 'Advisory review completed.'))[:2000]
         review['suggestions'] = _suggestions(result.get('suggestions'))

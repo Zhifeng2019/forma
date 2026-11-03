@@ -3,13 +3,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Circle, Code2, Copy, ExternalLink, FileJson2, FileText, Globe2, History, Laptop, LoaderCircle, Maximize2, MessageSquareText, Monitor, MousePointer2, Paperclip, RefreshCw, Rocket, Send, Server, ShieldCheck, Smartphone, Sparkles, Tablet, X } from 'lucide-react'
-import { api, getToken } from '../api'
+import { api } from '../api'
 import type { Message as ChatMessage, Project, Selection, User } from '../types'
 import { LogoMark } from '../App'
 import { Modal } from '../components/Modal'
 import { BackendPanel } from '../components/BackendPanel'
 import { SourcePanel } from '../components/SourcePanel'
-import { contractApprovalError, SpecReview } from '../components/SpecReview'
+import { SpecReview } from '../components/SpecReview'
 import { VerificationPanel } from '../components/VerificationPanel'
 import { CancelJobButton } from '../components/CancelJobButton'
 import { UsagePanel } from '../components/UsagePanel'
@@ -24,6 +24,7 @@ const stages = [
   { id: 'deploy', short: 'Publish', title: 'Ready to publish', action: 'Publish app' },
 ]
 type Tab = 'preview' | 'documents' | 'contract' | 'verification' | 'source' | 'server' | 'activity'
+type PreviewSession = { url: string; origin: string; expires_at: number; project_id: string; version: number }
 
 export function Builder({ user }: { user: User; onUser: (user: User | null) => void }) {
   const { id = '' } = useParams()
@@ -39,6 +40,8 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   const [picking, setPicking] = useState(false)
   const [selection, setSelection] = useState<Selection>(null)
   const [previewKey, setPreviewKey] = useState(0)
+  const [preview, setPreview] = useState<PreviewSession | null>(null)
+  const [previewError, setPreviewError] = useState('')
   const [docPath, setDocPath] = useState('product.md')
   const [publish, setPublish] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -92,18 +95,54 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
     const timer = window.setInterval(() => { void refresh() }, eventConnected ? 30_000 : 1500)
     return () => { active = false; window.clearInterval(timer) }
   }, [id, busy, eventConnected, project?.status, project?.stage, project?.auto_mode, project?.verification_running])
-  useEffect(() => {
-    if (project?.stage === 'build' && project.current_version === 0 && project.appspec_enabled && project.appspec) setTab('contract')
-  }, [project?.stage, project?.current_version, project?.appspec_enabled, project?.appspec])
   useEffect(() => { if (project?.status !== 'working') setMigrationTarget(null) }, [project?.status])
+  useEffect(() => {
+    if (project?.stage === 'build' && !project.current_version && project.status === 'ready'
+        && project.artifacts.some(artifact => artifact.path === 'plan.md')) {
+      setDocPath('plan.md'); setTab('documents')
+    }
+  }, [project?.stage, project?.current_version, project?.status])
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [project?.messages.length])
+  const previewVersion = viewVersion || project?.current_version || 0
+  const activePreview = preview?.project_id === id && preview.version === previewVersion ? preview : null
+  useEffect(() => {
+    let active = true
+    let timer: number | undefined
+    setPreview(null); setPreviewError('')
+    if (!previewVersion) return
+    const renew = async () => {
+      try {
+        const session = await api<PreviewSession>(`/projects/${id}/preview-session?version=${previewVersion}`, { method: 'POST' })
+        if (!active) return
+        if (session.origin === window.location.origin || new URL(session.url).origin !== session.origin) {
+          throw new Error('Preview hosting must use a separate address from the studio.')
+        }
+        setPreview(session); setPreviewError('')
+        const remaining = session.expires_at * 1000 - Date.now()
+        timer = window.setTimeout(() => { void renew() }, Math.max(1000, remaining - Math.min(60_000, remaining / 3)))
+      } catch (reason) {
+        if (!active) return
+        setPreview(null)
+        setPreviewError(reason instanceof Error ? reason.message : String(reason))
+      }
+    }
+    void renew()
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [id, previewVersion, previewKey])
   useEffect(() => {
     const handler = (event: MessageEvent) => {
-      if (event.data?.type === 'forma-selection') { setSelection(event.data.selection); setPicking(false) }
+      if (!picking || !activePreview || event.origin !== activePreview.origin || event.source !== frameRef.current?.contentWindow) return
+      const selected = event.data?.selection
+      if (event.data?.type === 'forma-selection' && typeof selected?.selector === 'string' && typeof selected?.text === 'string') {
+        setSelection({ selector: selected.selector.slice(0, 2000), text: selected.text.slice(0, 160) }); setPicking(false)
+      }
     }
     window.addEventListener('message', handler); return () => window.removeEventListener('message', handler)
-  }, [])
-  useEffect(() => { frameRef.current?.contentWindow?.postMessage({ type: 'forma-picker', enabled: picking }, '*') }, [picking, previewKey])
+  }, [activePreview, picking])
+  const syncPicker = () => {
+    if (activePreview) frameRef.current?.contentWindow?.postMessage({ type: 'forma-picker', enabled: picking }, activePreview.origin)
+  }
+  useEffect(syncPicker, [picking, activePreview, tab])
 
   const autopilotInProgress = Boolean(project?.auto_mode && project.status !== 'error' && ['discovery', 'design', 'plan', 'build'].includes(project.stage))
   const eventEnabled = Boolean(project && (project.durable_jobs_enabled || project.verification_running) && (busy || autopilotInProgress || project.status === 'working' || project.verification_running))
@@ -114,23 +153,20 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
   const stage = stages[project.stage_index] || stages[0]
   const html = project.artifacts.find(a => a.version === project.current_version && ['index.html', 'frontend/index.html'].includes(a.path))
   const document = project.artifacts.find(a => a.path === docPath)
-  const isWorking = busy || project.status === 'working' || project.verification_running
-  const contractError = contractApprovalError(project)
+  const isWorking = Boolean(busy || project.status === 'working' || project.verification_running)
   const isCancelling = cancelPending || ['cancel_requested', 'cancelling'].includes(project.active_job?.status || '')
   const currentWorkingLabel = isCancelling ? 'Cancelling…' : project.verification_running ? 'Verifying your application…' : migrationTarget ? `Migrating to ${migrationTarget === 'fastapi' ? 'FastAPI' : 'frontend only'}…` : workingLabel(project.stage)
-  const publishUrl = `${window.location.origin}/apps/${project.id}/`
+  const publishUrl = project.published_url || ''
 
   const advance = async () => {
     if (project.stage === 'deploy') { setPublish(true); return }
-    if (contractError) { setError(contractError); setTab('contract'); return }
     const previousVersion = project.current_version
     setBusy(true); setError('')
     try {
       const next = await api<Project>(`/projects/${id}/advance`, { method: 'POST', body: JSON.stringify({ feedback: '', defer: true }) })
       setProject(next)
       if (next.current_version !== previousVersion) setPreviewKey(k => k + 1)
-      if (next.stage === 'build' && next.current_version === 0 && next.appspec_enabled) setTab('contract')
-      else if (next.stage === 'build' || next.stage === 'review') setTab('preview')
+      if (next.stage === 'build' || next.stage === 'review') setTab('preview')
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) }
   }
   const runVerification = async (includeOptional: boolean, includeReview = false) => {
@@ -180,7 +216,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
     try { const next = await api<Project>(`/projects/${id}/publish`, { method: 'POST', body: JSON.stringify({ version: project.current_version }) }); setProject(next); setCopied(false) }
     catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
-      if (project.appspec_enabled) { setTab('verification'); void load() }
+      if (project.verification_available) { setTab('verification'); void load() }
     } finally { setBusy(false) }
   }
   const migrateArchitecture = async () => {
@@ -209,10 +245,10 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
         <div className="chat-scroll"><div className="context-card"><span>BUILDING</span><strong>{project.name}</strong><p>{project.brief}</p></div>{project.messages.map(msg => <div key={msg.id} className={`chat-message ${msg.role}`} >{msg.role === 'agent' && <span className="agent-avatar"><Sparkles size={13} /></span>}<div><span className="message-author">{msg.role === 'agent' ? 'Forma' : 'You'}<time>{timeLabel(msg.created_at)}</time></span><p>{msg.content}</p>{msg.kind === 'stage' && msg.role === 'agent' && <span className="message-receipt"><CheckCircle2 size={12} />Workspace updated</span>}</div></div>)}{isWorking && <div className="chat-message agent"><span className="agent-avatar"><Sparkles size={13} /></span><div><span className="message-author">Forma</span><div className="thinking"><i /><i /><i /><span>{currentWorkingLabel}</span></div></div></div>}<div ref={chatEnd} /></div>
         <div className="composer-wrap">{selection && <div className="selection-pill"><MousePointer2 size={13} /><span>{selection.selector}</span><button onClick={() => setSelection(null)}><X size={12} /></button></div>}<form className="composer" onSubmit={send}><textarea value={message} onChange={e => setMessage(e.target.value)} placeholder={selection ? 'What should change here?' : 'Ask for a change or share feedback…'} rows={3} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(e) } }} /><div><button type="button" className={`icon-button ${picking ? 'active' : ''}`} title="Select an element in the preview" onClick={() => { setTab('preview'); setPicking(!picking) }}><Paperclip size={16} /></button><span>↵ to send</span><button className="send-button" disabled={!message.trim() || isWorking}><Send size={15} /></button></div></form><p className="composer-note">Forma can make mistakes. Review before publishing.</p></div>
       </aside>
-      <main className="work-panel"><header className="work-tabs"><div><button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Monitor size={15} />Preview</button><button className={tab === 'documents' ? 'active' : ''} onClick={() => setTab('documents')}><FileText size={15} />Documents<span>{project.artifacts.filter(a => a.path.endsWith('.md')).length}</span></button>{(project.appspec_enabled || project.appspec) && <button className={tab === 'contract' ? 'active' : ''} onClick={() => setTab('contract')}><FileJson2 size={15} />Contract</button>}{(project.appspec_enabled || project.appspec) && <button className={tab === 'verification' ? 'active' : ''} onClick={() => setTab('verification')}><ShieldCheck size={15} />Verification</button>}<button className={tab === 'source' ? 'active' : ''} onClick={() => setTab('source')}><Code2 size={15} />Source</button>{project.backend_mode === 'fastapi' && <button className={tab === 'server' ? 'active' : ''} onClick={() => setTab('server')}><Server size={15} />Server</button>}<button className={tab === 'activity' ? 'active' : ''} onClick={() => setTab('activity')}><Activity size={15} />Activity</button></div>{tab === 'preview' && html && <div className="preview-tools"><span className="device-switch"><button className={device === 'desktop' ? 'active' : ''} onClick={() => setDevice('desktop')} title="Desktop"><Laptop size={15} /></button><button className={device === 'tablet' ? 'active' : ''} onClick={() => setDevice('tablet')} title="Tablet"><Tablet size={15} /></button><button className={device === 'mobile' ? 'active' : ''} onClick={() => setDevice('mobile')} title="Mobile"><Smartphone size={15} /></button></span><button className={`icon-button ${picking ? 'active picker-on' : ''}`} onClick={() => setPicking(!picking)} title="Select element to edit"><MousePointer2 size={16} /></button><button className="icon-button" onClick={() => setPreviewKey(k => k + 1)} title="Refresh preview"><RefreshCw size={15} /></button></div>}</header>
+      <main className="work-panel"><header className="work-tabs"><div><button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Monitor size={15} />Preview</button><button className={tab === 'documents' ? 'active' : ''} onClick={() => setTab('documents')}><FileText size={15} />Documents<span>{project.artifacts.filter(a => a.path.endsWith('.md')).length}</span></button>{(project.verification_available || project.appspec) && <button className={tab === 'contract' ? 'active' : ''} onClick={() => setTab('contract')}><FileJson2 size={15} />Contract</button>}{(project.verification_available || project.appspec) && <button className={tab === 'verification' ? 'active' : ''} onClick={() => setTab('verification')}><ShieldCheck size={15} />Verification</button>}<button className={tab === 'source' ? 'active' : ''} onClick={() => setTab('source')}><Code2 size={15} />Source</button>{project.backend_mode === 'fastapi' && <button className={tab === 'server' ? 'active' : ''} onClick={() => setTab('server')}><Server size={15} />Server</button>}<button className={tab === 'activity' ? 'active' : ''} onClick={() => setTab('activity')}><Activity size={15} />Activity</button></div>{tab === 'preview' && html && <div className="preview-tools"><span className="device-switch"><button className={device === 'desktop' ? 'active' : ''} onClick={() => setDevice('desktop')} title="Desktop"><Laptop size={15} /></button><button className={device === 'tablet' ? 'active' : ''} onClick={() => setDevice('tablet')} title="Tablet"><Tablet size={15} /></button><button className={device === 'mobile' ? 'active' : ''} onClick={() => setDevice('mobile')} title="Mobile"><Smartphone size={15} /></button></span><button className={`icon-button ${picking ? 'active picker-on' : ''}`} onClick={() => setPicking(!picking)} title="Select element to edit"><MousePointer2 size={16} /></button><button className="icon-button" onClick={() => setPreviewKey(k => k + 1)} title="Refresh preview"><RefreshCw size={15} /></button></div>}</header>
         {error && <div className="builder-error">{error}<button onClick={() => setError('')}><X size={14} /></button></div>}
         <section className="workspace-content">
-          {tab === 'preview' && (html ? <div className={`preview-stage ${device}`}><div className="browser-bar"><div className="browser-dots"><i /><i /><i /></div><div className="browser-address"><span>⌕</span>preview.forma.local/{project.id.slice(0, 8)}</div><button onClick={() => window.open(`/api/projects/${id}/preview?access_token=${encodeURIComponent(getToken() || '')}&version=${viewVersion || project.current_version}`, '_blank')}><ExternalLink size={14} /></button></div><iframe key={`${previewKey}-${viewVersion}`} ref={frameRef} src={`/api/projects/${id}/preview?access_token=${encodeURIComponent(getToken() || '')}&version=${viewVersion || project.current_version}`} title={`${project.name} preview`} sandbox="allow-scripts allow-forms allow-modals allow-same-origin" />{picking && <div className="picker-banner"><MousePointer2 size={14} />Click any element to give targeted feedback<button onClick={() => setPicking(false)}>Cancel</button></div>}{viewVersion && <div className="history-banner"><History size={14} />Viewing version {viewVersion}<button onClick={() => chooseVersion(null)}>Return to current</button></div>}</div> : <PreviewEmpty stage={project.stage_index} onAction={advance} busy={isWorking || Boolean(contractError)} />)}
+          {tab === 'preview' && (html ? <div className={`preview-stage ${device}`}><div className="browser-bar"><div className="browser-dots"><i /><i /><i /></div><div className="browser-address"><span>⌕</span>preview.forma.local/{project.id.slice(0, 8)}</div><button disabled={!activePreview} onClick={() => activePreview && window.open(activePreview.url, '_blank', 'noopener,noreferrer')}><ExternalLink size={14} /></button></div><>{activePreview ? <iframe key={activePreview.url} ref={frameRef} src={activePreview.url} onLoad={syncPicker} referrerPolicy="no-referrer" title={`${project.name} preview`} sandbox="allow-scripts allow-forms allow-modals allow-same-origin" /> : <div className="empty-state" role="status"><p>{previewError || 'Preparing your preview…'}</p>{previewError && <button className="button secondary" onClick={() => setPreviewKey(key => key + 1)}>Retry preview</button>}</div>}</>{picking && <div className="picker-banner"><MousePointer2 size={14} />Click any element to give targeted feedback<button onClick={() => setPicking(false)}>Cancel</button></div>}{viewVersion && <div className="history-banner"><History size={14} />Viewing version {viewVersion}<button onClick={() => chooseVersion(null)}>Return to current</button></div>}</div> : <PreviewEmpty stage={project.stage_index} onAction={advance} busy={isWorking} />)}
           {tab === 'documents' && <div className="documents-view"><nav>{project.artifacts.filter(a => a.path.endsWith('.md')).map(a => <button className={docPath === a.path ? 'active' : ''} key={a.path} onClick={() => setDocPath(a.path)}><FileText size={16} /><span>{a.path}<small>{a.stage}</small></span><ArrowRight size={13} /></button>)}{!project.artifacts.some(a => a.path.endsWith('.md')) && <p>Documents will appear as your product team completes each stage.</p>}</nav><article className="markdown-body">{document ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{document.content}</ReactMarkdown> : <div className="empty-state"><FileText size={28} /><h3>Document in progress</h3></div>}</article></div>}
           {tab === 'contract' && <SpecReview project={project} />}
           {tab === 'verification' && <VerificationPanel project={project} onVerify={runVerification} busy={Boolean(isWorking)} />}
@@ -220,7 +256,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
           {tab === 'server' && project.backend_mode === 'fastapi' && <BackendPanel project={project} onChanged={() => void load()} />}
           {tab === 'activity' && <div className="activity-view"><div className="activity-heading"><span className="eyebrow">PROJECT TIMELINE</span><h2>Every step, in the open.</h2><p>A clear record of your product team’s work and releases.</p></div><UsagePanel projectId={project.id} updatedAt={project.updated_at} /><div className="timeline">{project.events.map(event => <div key={event.id}><span className={event.level}>{event.level === 'success' ? <Check size={13} /> : event.level === 'error' ? <X size={13} /> : <Circle size={9} />}</span><section><strong>{event.message}</strong><small>{new Date(event.created_at).toLocaleString()}</small></section></div>)}</div></div>}
         </section>
-        <footer className="approval-bar"><div><span className="stage-icon">{isWorking ? <LoaderCircle className="spin" size={18} /> : <CheckCircle2 size={18} />}</span><div><strong>{isWorking ? currentWorkingLabel : stage.title}</strong><small>{isWorking ? 'You can keep reviewing the current workspace.' : contractError || approvalHint(project)}</small></div></div>{isWorking && project.active_job && <CancelJobButton cancelling={isCancelling} onCancel={cancelActiveJob} />}<button className="button primary" disabled={isWorking || Boolean(contractError) || project.stage === 'deploy'} title={contractError || undefined} onClick={advance}>{project.stage === 'deploy' ? <><Globe2 size={15} />{project.published_version ? 'Published' : 'Ready to publish'}</> : <>{project.stage === 'build' ? (project.phase_index ? `Approve phase ${project.phase_index}` : 'Build phase 1') : stage.action}<ArrowRight size={15} /></>}</button></footer>
+        <footer className="approval-bar"><div><span className="stage-icon">{isWorking ? <LoaderCircle className="spin" size={18} /> : <CheckCircle2 size={18} />}</span><div><strong>{isWorking ? currentWorkingLabel : stage.title}</strong><small>{isWorking ? 'You can keep reviewing the current workspace.' : approvalHint(project)}</small></div></div>{isWorking && project.active_job && <CancelJobButton cancelling={isCancelling} onCancel={cancelActiveJob} />}<button className="button primary" disabled={isWorking || project.stage === 'deploy'} onClick={advance}>{project.stage === 'deploy' ? <><Globe2 size={15} />{project.published_version ? 'Published' : 'Ready to publish'}</> : <>{project.stage === 'build' ? (project.phase_index ? `Approve phase ${project.phase_index}` : 'Build phase 1') : stage.action}<ArrowRight size={15} /></>}</button></footer>
       </main>
     </div>
     {showArchitecture && <Modal title={project.backend_mode === 'fastapi' ? 'Move to frontend-only?' : 'Add a FastAPI backend?'} eyebrow="APPLICATION ARCHITECTURE" onClose={() => !busy && setShowArchitecture(false)} className="architecture-modal">
@@ -231,7 +267,7 @@ export function Builder({ user }: { user: User; onUser: (user: User | null) => v
       {error && <div className="form-error">{error}</div>}
       <footer className="modal-actions"><button className="button ghost" onClick={() => setShowArchitecture(false)} disabled={busy}>Cancel</button><button className="button primary" onClick={migrateArchitecture} disabled={busy}>{busy ? <span className="spinner" /> : project.backend_mode === 'fastapi' ? 'Switch to frontend only' : 'Add FastAPI'}<ArrowRight size={15} /></button></footer>
     </Modal>}
-    {publish && <Modal title={project.published_version ? 'Your app is out in the world.' : 'Ready to make it real?'} eyebrow="PUBLISH YOUR APPLICATION" onClose={() => setPublish(false)} className="publish-modal"><div className="publish-hero"><span><Rocket size={28} /></span><h3>{project.name}</h3><p>{project.published_version ? `Version ${project.published_version} is live and ready to share.` : `Publish version ${project.current_version || '—'} to a public, shareable URL. You can keep improving and republish anytime.`}</p></div>{project.published_version ? <><label>Public application URL<div className="copy-field"><Globe2 size={16} /><input readOnly value={publishUrl} /><button onClick={copy}>{copied ? <Check size={16} /> : <Copy size={16} />}</button></div></label><div className="publish-actions"><a className="button secondary" href={publishUrl} target="_blank">Open live app<ArrowUpRight size={15} /></a>{project.published_version !== project.current_version && <button className="button primary" onClick={doPublish} disabled={busy}>Publish latest v{project.current_version}</button>}</div><button className="unpublish" onClick={async () => { await api(`/projects/${id}/unpublish`, { method: 'POST' }); setProject({ ...project, published_version: null }); setPublish(false) }}>Unpublish application</button></> : <footer className="modal-actions"><button className="button ghost" onClick={() => setPublish(false)}>Not yet</button><button className="button primary" onClick={doPublish} disabled={!project.current_version || busy}>{busy ? <span className="spinner" /> : <><Rocket size={15} />Publish application</>}</button></footer>}</Modal>}
+    {publish && <Modal title={project.published_version ? 'Your app is out in the world.' : 'Ready to make it real?'} eyebrow="PUBLISH YOUR APPLICATION" onClose={() => setPublish(false)} className="publish-modal"><div className="publish-hero"><span><Rocket size={28} /></span><h3>{project.name}</h3><p>{project.published_version ? `Version ${project.published_version} is live and ready to share.` : `Publish version ${project.current_version || '—'} to a public, shareable URL. You can keep improving and republish anytime.`}</p></div>{project.published_version ? <><label>Public application URL<div className="copy-field"><Globe2 size={16} /><input readOnly value={publishUrl} /><button onClick={copy}>{copied ? <Check size={16} /> : <Copy size={16} />}</button></div></label><div className="publish-actions"><a className="button secondary" href={publishUrl} target="_blank" rel="noopener noreferrer">Open live app<ArrowUpRight size={15} /></a>{project.published_version !== project.current_version && <button className="button primary" onClick={doPublish} disabled={busy}>Publish latest v{project.current_version}</button>}</div><button className="unpublish" onClick={async () => { await api(`/projects/${id}/unpublish`, { method: 'POST' }); setProject({ ...project, published_version: null }); setPublish(false) }}>Unpublish application</button></> : <footer className="modal-actions"><button className="button ghost" onClick={() => setPublish(false)}>Not yet</button><button className="button primary" onClick={doPublish} disabled={!project.current_version || busy}>{busy ? <span className="spinner" /> : <><Rocket size={15} />Publish application</>}</button></footer>}</Modal>}
   </div>
 }
 
@@ -239,6 +275,6 @@ function PreviewEmpty({ stage, onAction, busy }: { stage: number; onAction: () =
   return <div className="preview-empty"><div className="empty-canvas"><span className="empty-logo"><Code2 size={28} /></span><i className="line one" /><i className="line two" /><div><i /><i /><i /></div></div><span className="eyebrow">YOUR APPLICATION TAKES SHAPE HERE</span><h2>{stage < 3 ? 'A strong product starts with clarity.' : 'Your first preview is almost here.'}</h2><p>{stage < 3 ? 'Complete the description, design, and plan. Then watch your idea become a working product.' : 'Approve the current phase to generate a working preview.'}</p><button className="button secondary" onClick={onAction} disabled={busy}>Continue with Forma<ArrowRight size={15} /></button></div>
 }
 function workingLabel(stage: string) { return stage === 'discovery' ? 'Shaping the product description…' : stage === 'design' ? 'Designing the experience…' : stage === 'plan' ? 'Planning the implementation…' : stage === 'deploy' ? 'Preparing your release…' : 'Building your application…' }
-function approvalHint(project: Project) { if (project.stage === 'build') return `Phase ${project.phase_index} of 3 · Review the preview, then continue.`; if (project.stage === 'review') return 'Try the interactions. Send feedback or approve the release.'; if (project.stage === 'deploy') return project.published_version ? 'Your latest approved application is live.' : 'Everything is ready for your public release.'; return 'Review the document and share feedback, or approve to continue.' }
+function approvalHint(project: Project) { if (project.stage === 'build' && !project.current_version) return 'Review the implementation plan. Feedback revises it; build when you’re ready.'; if (project.stage === 'build') return `Phase ${project.phase_index} of 3 · Review the preview, then continue.`; if (project.stage === 'review') return 'Try the interactions. Send feedback or approve the release.'; if (project.stage === 'deploy') return project.published_version ? 'Your latest approved application is live.' : 'Everything is ready for your public release.'; return 'Review the document and share feedback, or approve to continue.' }
 function timeLabel(value: string) { try { return new Date(value.replace(' ', 'T') + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
 function MoreIcon() { return <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor"><circle cx="3" cy="9" r="1.4" /><circle cx="9" cy="9" r="1.4" /><circle cx="15" cy="9" r="1.4" /></svg> }

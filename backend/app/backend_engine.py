@@ -93,11 +93,13 @@ def application_prompt(
     feedback: str,
     current_html: str,
     current_python: str,
+    planning_context: str = '',
 ) -> str:
     return f'''Product: {name}
 Brief: {brief}
 Implementation phase: {phase}/3
 Feedback: {feedback}
+{planning_context}
 Current HTML to improve: {current_html or 'None'}
 Current FastAPI source to improve: {current_python or 'None'}
 
@@ -111,7 +113,7 @@ Requirements:
 - The runtime injects `window.Forma.api(path, options)` before application scripts. EVERY backend request MUST use `Forma.api('/resource', options)`, without an `/api` prefix. Example: `const items = await Forma.api('/items');` and `await Forma.api('/items', {{method:'POST', body:JSON.stringify({{title}})}})`. Do not call fetch directly for the application API.
 - Base packages: fastapi, pydantic, uvicorn, and email-validator. Reviewed optional packages: httpx, PyJWT, cryptography, pydantic-settings, python-multipart, SQLAlchemy. Include optional packages in requirements only when used. Do not import os, sys, subprocess, socket, shutil, pathlib, requests, urllib, ctypes, or importlib. Do not read host files or environment variables.
 - Keep the backend focused and below 500 lines. Preserve working API contracts when refining an existing version.
-- Phase 1 must already have a working preview and health endpoint. Phase 2 completes the primary server-backed workflow. Phase 3 improves reliability and release polish.'''
+- Every phase must leave a working preview and health endpoint. Follow the supplied implementation plan for the scope of each phase.'''
 
 
 def has_forma_api(script: str) -> bool:

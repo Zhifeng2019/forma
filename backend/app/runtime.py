@@ -255,13 +255,16 @@ class RuntimeManager:
             'import importlib,importlib.metadata,pathlib,sys,sysconfig\n'
             'expected=[line.strip().split("==",1) for line in pathlib.Path(sys.argv[1]).read_text().splitlines() if line.strip()]\n'
             'site=pathlib.Path(sysconfig.get_path("purelib")).resolve()\n'
+            'import_names={"pyjwt":"jwt"}\n'
             'problems=[]\n'
             'for package,wanted in expected:\n'
             '    try:\n'
             '        distribution=importlib.metadata.distribution(package)\n'
             '        actual=distribution.version\n'
             '        dist_path=pathlib.Path(distribution.locate_file("")).resolve()\n'
-            '        module_path=pathlib.Path(importlib.import_module(package.replace("-","_")).__file__).resolve()\n'
+            '        normalized=package.lower().replace("-","_")\n'
+            '        module_name=import_names.get(normalized,normalized)\n'
+            '        module_path=pathlib.Path(importlib.import_module(module_name).__file__).resolve()\n'
             '    except Exception as exc:\n'
             '        problems.append(f"{package} is unavailable: {type(exc).__name__}")\n'
             '        continue\n'
@@ -486,6 +489,7 @@ class RuntimeManager:
         content_type: str,
         source_format: str = 'single-file',
         files: dict[str, str] | None = None,
+        authorization: str = '',
     ) -> httpx.Response:
         runtime = await self.ensure(project_id, version, channel, source, requirements, source_format, files)
         if path.startswith('/') or '..' in path.split('/'):
@@ -495,6 +499,8 @@ class RuntimeManager:
         headers = {'Accept': 'application/json'}
         if content_type:
             headers['Content-Type'] = content_type
+        if authorization:
+            headers['Authorization'] = authorization
         try:
             async with httpx.AsyncClient(timeout=settings.runtime_request_timeout, trust_env=False) as client:
                 return await client.request(method, target, params=query, content=body, headers=headers)
@@ -613,9 +619,11 @@ class RuntimeManager:
 runtime_manager = RuntimeManager()
 
 
-def runtime_bootstrap(project_id: str, version: int, published: bool) -> str:
+def runtime_bootstrap(project_id: str, version: int, published: bool, api_prefix: str | None = None) -> str:
     project = json.dumps(project_id)
-    prefix = f'/apps/{project_id}/api' if published else f'/api/projects/{project_id}/runtime/{version}'
+    if not published and not api_prefix:
+        raise ValueError('Private runtime bridges require an isolated preview API prefix')
+    prefix = api_prefix or f'/apps/{project_id}/api'
     base = json.dumps(prefix)
     private = 'false' if published else 'true'
     return f'''<script>(function(){{
@@ -626,7 +634,6 @@ async function api(path,options={{}}){{
   if(url.origin!==window.location.origin||!url.pathname.startsWith(root.pathname))throw new Error('Application API path escapes its runtime');
   const headers=new Headers(options.headers||{{}});
   if(options.body!==undefined&&!(options.body instanceof FormData)&&!headers.has('Content-Type'))headers.set('Content-Type','application/json');
-  if(privatePreview){{const token=new URLSearchParams(window.location.search).get('access_token');if(token)headers.set('Authorization','Bearer '+token)}}
   const response=await fetch(url,{{...options,headers}}),type=response.headers.get('content-type')||'';
   if(response.status===204)return null;
   const data=type.includes('json')?await response.json():await response.text();
@@ -638,9 +645,8 @@ const nativeFetch=window.fetch.bind(window);
 window.fetch=async(input,init={{}})=>{{
   try{{
     const raw=input instanceof Request?input.url:String(input),url=new URL(raw,window.location.origin);
-    if(url.origin===window.location.origin&&url.pathname.startsWith('/api/')&&!url.pathname.startsWith('/api/projects/')){{
+    if(url.origin===window.location.origin&&url.pathname.startsWith('/api/')){{
       const headers=new Headers(init.headers||(input instanceof Request?input.headers:{{}}));
-      if(privatePreview){{const token=new URLSearchParams(window.location.search).get('access_token');if(token)headers.set('Authorization','Bearer '+token)}}
       if(init.body!==undefined&&!(init.body instanceof FormData)&&!headers.has('Content-Type'))headers.set('Content-Type','application/json');
       const target=base+url.pathname.slice(4)+url.search;
       if(input instanceof Request){{const request=new Request(target,input);return nativeFetch(request,{{...init,headers}})}}
@@ -652,8 +658,8 @@ window.fetch=async(input,init={{}})=>{{
 }})();</script>'''
 
 
-def inject_runtime_bootstrap(html: str, project_id: str, version: int, published: bool) -> str:
-    bootstrap = runtime_bootstrap(project_id, version, published)
+def inject_runtime_bootstrap(html: str, project_id: str, version: int, published: bool, api_prefix: str | None = None) -> str:
+    bootstrap = runtime_bootstrap(project_id, version, published, api_prefix)
     for pattern in (r'<head[^>]*>', r'<html[^>]*>'):
         match = re.search(pattern, html, re.IGNORECASE)
         if match:

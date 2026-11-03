@@ -4,13 +4,11 @@ import json
 import httpx
 
 from app import engine
-from app.config import settings
 from app.database import workspace_db
 from app.jobs.context import JobContext, activate_job_context, reset_job_context
 from app.jobs.leases import lease_next_job
 from app.jobs.service import create_job
 from app.security import encrypt_secret
-from app.spec.defaults import local_default_appspec
 from test_spec_review import make_project
 
 
@@ -44,10 +42,6 @@ def provider():
     }
 
 
-def spec(backend_mode='static'):
-    return local_default_appspec('Contract Review', 'A reviewable workspace.', 'single-file', backend_mode)
-
-
 def run_with_job(user_id, project_id, operation):
     with workspace_db(user_id) as db:
         job_id, _ = create_job(db, project_id, 'plan', 'lock-test', 'advance-stage', 'lock-trace')
@@ -63,18 +57,16 @@ def run_with_job(user_id, project_id, operation):
 def test_plan_provider_telemetry_does_not_overlap_artifact_write_transaction(monkeypatch):
     user_id = 960600
     project_id = make_project(user_id)
-    Client.responses = [Response(json.dumps({'document': '# Implementation plan'})),
-                        Response(json.dumps(spec().model_dump(mode='json', exclude_none=True)))]
+    Client.responses = [Response(json.dumps({'document': '# Implementation plan'}))]
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **_kwargs: Client())
-    monkeypatch.setattr(settings, 'appspec_v1', True)
     run_with_job(user_id, project_id, engine._advance(user_id, project_id, provider()))
     with workspace_db(user_id) as db:
         project = db.execute('SELECT stage,status FROM projects WHERE id=?', (project_id,)).fetchone()
         assert project['stage'] == 'build' and project['status'] == 'ready'
         assert db.execute("SELECT COUNT(*) FROM artifacts WHERE project_id=? AND path='plan.md'", (project_id,)).fetchone()[0] == 1
         job_id = db.execute('SELECT id FROM generation_jobs WHERE project_id=?', (project_id,)).fetchone()['id']
-        assert db.execute('SELECT COUNT(*) FROM tool_runs WHERE job_id=?', (job_id,)).fetchone()[0] == 2
-        assert db.execute('SELECT COUNT(*) FROM usage_ledger WHERE job_id=?', (job_id,)).fetchone()[0] == 2
+        assert db.execute('SELECT COUNT(*) FROM tool_runs WHERE job_id=?', (job_id,)).fetchone()[0] == 1
+        assert db.execute('SELECT COUNT(*) FROM usage_ledger WHERE job_id=?', (job_id,)).fetchone()[0] == 1
 
 
 def test_plan_revision_provider_telemetry_does_not_overlap_description_write(monkeypatch):
@@ -83,10 +75,8 @@ def test_plan_revision_provider_telemetry_does_not_overlap_description_write(mon
     with workspace_db(user_id) as db:
         db.execute("INSERT INTO artifacts(project_id,stage,path,content,version) VALUES(?,?,?,?,?)",
                    (project_id, 'plan', 'plan.md', '# Original plan', 0))
-    Client.responses = [Response(json.dumps({'document': '# Revised plan'})),
-                        Response(json.dumps(spec().model_dump(mode='json', exclude_none=True)))]
+    Client.responses = [Response(json.dumps({'document': '# Revised plan'}))]
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **_kwargs: Client())
-    monkeypatch.setattr(settings, 'appspec_v1', True)
     run_with_job(user_id, project_id, engine._revise_document(user_id, project_id, provider(), 'Clarify the first phase'))
     with workspace_db(user_id) as db:
         description = db.execute('SELECT description FROM projects WHERE id=?', (project_id,)).fetchone()['description']
@@ -94,18 +84,17 @@ def test_plan_revision_provider_telemetry_does_not_overlap_description_write(mon
         content = db.execute("SELECT content FROM artifacts WHERE project_id=? AND path='plan.md'", (project_id,)).fetchone()['content']
         assert content == '# Revised plan'
         job_id = db.execute('SELECT id FROM generation_jobs WHERE project_id=?', (project_id,)).fetchone()['id']
-        assert db.execute('SELECT COUNT(*) FROM tool_runs WHERE job_id=?', (job_id,)).fetchone()[0] == 2
+        assert db.execute('SELECT COUNT(*) FROM tool_runs WHERE job_id=?', (job_id,)).fetchone()[0] == 1
 
 
-def test_prebuild_migration_provider_telemetry_does_not_overlap_architecture_write(monkeypatch):
+def test_prebuild_migration_does_not_call_the_retired_spec_provider(monkeypatch):
     user_id = 960602
     project_id = make_project(user_id)
-    Client.responses = [Response(json.dumps(spec('fastapi').model_dump(mode='json', exclude_none=True)))]
+    Client.responses = []
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **_kwargs: Client())
-    monkeypatch.setattr(settings, 'appspec_v1', True)
     run_with_job(user_id, project_id, engine._migrate_architecture(user_id, project_id, 'fastapi', provider(), ''))
     with workspace_db(user_id) as db:
         backend_mode = db.execute('SELECT backend_mode FROM projects WHERE id=?', (project_id,)).fetchone()['backend_mode']
         assert backend_mode == 'fastapi'
         job_id = db.execute('SELECT id FROM generation_jobs WHERE project_id=?', (project_id,)).fetchone()['id']
-        assert db.execute('SELECT COUNT(*) FROM tool_runs WHERE job_id=?', (job_id,)).fetchone()[0] == 1
+        assert db.execute('SELECT COUNT(*) FROM tool_runs WHERE job_id=?', (job_id,)).fetchone()[0] == 0

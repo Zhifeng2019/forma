@@ -49,7 +49,8 @@ def frontend_vite_config() -> str:
     return "import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()], base: './', build: { outDir: 'dist', emptyOutDir: true } })\n"
 
 
-def package_prompt(name: str, brief: str, phase: int, feedback: str, backend_mode: str, current_files: dict[str, str]) -> str:
+def package_prompt(name: str, brief: str, phase: int, feedback: str, backend_mode: str,
+                   current_files: dict[str, str], planning_context: str = '') -> str:
     current = '\n'.join(f'--- {path} ---\n{content}' for path, content in sorted(current_files.items())) or 'None'
     backend_requirement = ('Include the complete FastAPI package and a working /api/health route. Prefer Forma.api in frontend/src/api.js; same-origin fetch calls to /api/... are also supported by the runtime bridge.'
                            if backend_mode == 'fastapi' else 'Do not include a backend. frontend/src/api.js must implement browser-local persistence and must not use Forma.api.')
@@ -57,6 +58,7 @@ def package_prompt(name: str, brief: str, phase: int, feedback: str, backend_mod
 Brief: {brief}
 Implementation phase: {phase}/3
 Feedback: {feedback}
+{planning_context}
 Current package files:
 {current}
 
@@ -71,6 +73,7 @@ Required frontend files: frontend/index.html, frontend/src/main.jsx, frontend/sr
 - main.py must expose `app` through `from app.api import app`. app/api.py defines FastAPI and routes; models.py contains Pydantic models; database.py owns sqlite3 app.db persistence.
 - Reviewed Python dependencies allowed in python_dependencies: fastapi, uvicorn, pydantic, email-validator, httpx, PyJWT, cryptography, pydantic-settings, python-multipart, SQLAlchemy. Include only packages actually used.
 - The studio generates backend/requirements.txt from python_dependencies. Do not include requirements.txt in files.
+- Planning documents are context, not generated source. Do not return product.md, design.md, or plan.md in files.
 - Do not import os, sys, subprocess, socket, shutil, pathlib, requests, urllib, ctypes, or importlib. Do not read host files or environment variables.
 - The studio supplies package.json and vite.config.js with reviewed pinned npm versions. Do not change dependency versions.'''
 
@@ -85,6 +88,8 @@ def validate_source_package(
     normalized = {}
     for path, content in files.items():
         pure = PurePosixPath(path)
+        if str(pure) in {'product.md', 'design.md', 'plan.md'}:
+            raise GenerationError(f'{pure} is a reviewed planning document and must not be generated as application source.')
         if pure.is_absolute() or '..' in pure.parts:
             raise GenerationError(f'Invalid source path: {path}')
         if not isinstance(content, str):

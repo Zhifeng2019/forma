@@ -1,4 +1,4 @@
-"""Deterministic comparison of requested product scope and current CRUD capabilities."""
+"""Compare historical AppSpec scope against the retired compiler’s CRUD capabilities."""
 
 import re
 
@@ -8,7 +8,7 @@ _RULES = (
     (
         'authentication', 'Authentication and account verification',
         r'\b(?:log\s?in|sign\s?in|register|registration|authentication|email[- ]verified|password)\b',
-        'The deterministic compiler has no managed user identity, session, or account-verification workflow.',
+        'The retired deterministic compiler has no managed user identity, session, or account-verification workflow.',
     ),
     (
         'authorization', 'Roles and administrative permissions',
@@ -23,7 +23,7 @@ _RULES = (
     (
         'binary-content', 'Binary uploads and media storage',
         r'\b(?:images?|photos?|videos?|uploads?|attachments?|file upload)\b',
-        'The current scalar-field compiler does not implement binary upload, storage, or media lifecycle handling.',
+        'The retired scalar-field compiler does not implement binary upload, storage, or media lifecycle handling.',
     ),
     (
         'external-integrations', 'External services and delivery',
@@ -33,12 +33,12 @@ _RULES = (
     (
         'scheduled-lifecycle', 'Scheduled or expiring data lifecycle',
         r'\b(?:expires?|expiration|one day|24 hours|cron|scheduled job|automatically delete|automatically remove)\b',
-        'Scheduled expiration and background lifecycle work are outside the current generated backend contract.',
+        'Scheduled expiration and background lifecycle work are outside the historical generated backend contract.',
     ),
     (
         'realtime', 'Realtime collaboration',
         r'\b(?:real[- ]time|websockets?|live chat|collaborative editing)\b',
-        'Realtime channels and collaborative presence are not part of the current request/response CRUD compiler.',
+        'Realtime channels and collaborative presence are not part of the retired request/response CRUD compiler.',
     ),
 )
 
@@ -60,7 +60,7 @@ def assess_capabilities(spec: AppSpec) -> dict:
         count = len(requirements)
         summary = (
             f'{count} requested capability {"area is" if count == 1 else "areas are"} outside '
-            'Forma\'s current single-entity CRUD compiler. This is a limited scaffold, not the complete requested product.'
+            'the retired single-entity CRUD compiler that produced this version. This is a limited scaffold, not the complete requested product.'
         )
         status = 'limited'
     else:
@@ -82,5 +82,5 @@ def capability_error(assessment: dict) -> str:
     labels = ', '.join(item['label'] for item in assessment['requirements'])
     return (
         f'{assessment["summary"]} Unsupported requested areas: {labels}. '
-        'Narrow the product scope or extend the generator before publishing.'
+        'Build a new version implementing the requested capabilities before publishing.'
     )

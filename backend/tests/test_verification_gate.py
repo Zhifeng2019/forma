@@ -5,6 +5,8 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+from fixtures.archived_appspec import archived_package, spec_artifacts
+
 from app.config import settings
 from app.database import control_db, workspace_db
 from app.main import app
@@ -36,7 +38,17 @@ def build_version(client, label, appspec=True):
         response = client.post(f'/api/projects/{project_id}/advance', headers=auth(token), json={})
         assert response.status_code == 200, response.text
     assert response.json()['current_version'] == 1
+    if appspec:
+        install_historical_contract(account, project_id, 1)
     return account, project_id
+
+
+def install_historical_contract(account, project_id, version, backend_mode='static'):
+    package = archived_package('single-file', backend_mode)
+    with workspace_db(account['user']['id']) as db:
+        for path, content in {**package.files, **spec_artifacts(package)}.items():
+            db.execute('INSERT OR REPLACE INTO artifacts(project_id,stage,path,content,version) VALUES(?,?,?,?,?)',
+                       (project_id, 'build', path, content, version))
 
 
 def report(can_publish=True):
@@ -85,7 +97,6 @@ def fake_verifier(can_publish, calls, wait=None):
 
 def test_failed_gate_preserves_existing_release(monkeypatch):
     monkeypatch.setattr(settings, 'acceptance_gate_v1', True)
-    monkeypatch.setattr(settings, 'appspec_v1', True)
     with TestClient(app) as client:
         account, project_id = build_version(client, 'gate-failure')
         token = account['token']
@@ -97,6 +108,7 @@ def test_failed_gate_preserves_existing_release(monkeypatch):
             'target_mode': 'fastapi', 'defer': False,
         })
         assert response.status_code == 200, response.text
+        install_historical_contract(account, project_id, 2, backend_mode='fastapi')
         monkeypatch.setattr('app.api.verify_package', fake_verifier(False, calls))
         response = client.post(f'/api/projects/{project_id}/publish', headers=auth(token), json={})
         assert response.status_code == 409 and 'api.health' in response.text
@@ -110,7 +122,6 @@ def test_failed_gate_preserves_existing_release(monkeypatch):
 
 def test_successful_gate_and_idempotent_republish(monkeypatch):
     monkeypatch.setattr(settings, 'acceptance_gate_v1', True)
-    monkeypatch.setattr(settings, 'appspec_v1', True)
     with TestClient(app) as client:
         account, project_id = build_version(client, 'gate-success')
         token = account['token']
@@ -125,7 +136,6 @@ def test_successful_gate_and_idempotent_republish(monkeypatch):
 
 def test_publish_remains_legacy_when_gate_is_disabled(monkeypatch):
     monkeypatch.setattr(settings, 'acceptance_gate_v1', False)
-    monkeypatch.setattr(settings, 'appspec_v1', False)
     with TestClient(app) as client:
         account, project_id = build_version(client, 'gate-legacy', appspec=False)
         token = account['token']
@@ -140,9 +150,10 @@ def test_publish_remains_legacy_when_gate_is_disabled(monkeypatch):
 
 def test_gate_requires_a_valid_appspec(monkeypatch):
     monkeypatch.setattr(settings, 'acceptance_gate_v1', True)
-    monkeypatch.setattr(settings, 'appspec_v1', False)
     with TestClient(app) as client:
-        account, project_id = build_version(client, 'gate-no-spec', appspec=False)
+        account, project_id = build_version(client, 'gate-no-spec')
+        with workspace_db(account['user']['id']) as db:
+            db.execute("DELETE FROM artifacts WHERE project_id=? AND path='appspec.json'", (project_id,))
         response = client.post(f'/api/projects/{project_id}/publish', headers=auth(account['token']), json={})
         assert response.status_code == 409
         assert 'AppSpec' in response.text or 'acceptance manifest' in response.text
@@ -150,7 +161,6 @@ def test_gate_requires_a_valid_appspec(monkeypatch):
 
 def test_verify_endpoint_sync_and_deferred(monkeypatch):
     monkeypatch.setattr(settings, 'acceptance_gate_v1', True)
-    monkeypatch.setattr(settings, 'appspec_v1', True)
     with TestClient(app) as client:
         account, project_id = build_version(client, 'gate-endpoint')
         token = account['token']

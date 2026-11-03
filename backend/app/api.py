@@ -11,6 +11,9 @@ from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, 
 from .verification.runner import verify_package
 from .verification.review import latest_model_review
 from .security import hash_password, verify_password, create_token, encrypt_secret, decrypt_secret
+from .security import create_preview_token, decode_preview_token
+from .app_origins import application_origin, preview_url, published_url, studio_origins
+from .generation_context import read_version_context
 from .engine import add_message, add_event, generate_stage, migrate_architecture, revise_document, safe_selector
 from .llm import GenerationError
 from .backend_engine import BACKEND_PATH, REQUIREMENTS_PATH
@@ -293,21 +296,33 @@ def project_payload(user_id, project_id):
         artifacts = db.execute('''SELECT a.* FROM artifacts a JOIN (SELECT path,MAX(version) version FROM artifacts WHERE project_id=? GROUP BY path) latest
                                   ON a.path=latest.path AND a.version=latest.version WHERE a.project_id=? ORDER BY a.path''', (project_id, project_id))
         result['artifacts'] = rows(artifacts)
+        # Historical contracts belong to their version, never to a later LLM-generated revision.
         spec = db.execute('''SELECT content FROM artifacts WHERE project_id=? AND path='appspec.json'
-            ORDER BY version DESC LIMIT 1''', (project_id,)).fetchone()
+            AND version=?''', (project_id, result['current_version'])).fetchone()
         review = appspec_review(spec['content'] if spec else None)
         result.update(review)
         result['capability'] = (
             assess_capabilities(parse_appspec(review['appspec']['spec']))
             if review['appspec_valid'] is True and review['appspec']['spec'].get('entities') else None
         )
-        result['appspec_enabled'] = feature_enabled(FeatureFlag.APPSPEC_V1)
         result['durable_jobs_enabled'] = feature_enabled(FeatureFlag.DURABLE_JOBS_V1)
-        result['specialist_workers_enabled'] = feature_enabled(FeatureFlag.SPECIALIST_WORKERS_V1)
+        result['acceptance_gate_enabled'] = feature_enabled(FeatureFlag.ACCEPTANCE_GATE_V1)
+        result['verification_available'] = has_acceptance_contract(db, project_id, result['current_version'])
         result.update(verification_payload(user_id, project_id, result['current_version']))
         result['active_job'] = active_job(db, project_id)
-        result['published_url'] = f'/apps/{project_id}/' if result['published_version'] else None
+        result['published_url'] = published_url(project_id) if result['published_version'] else None
         return result
+
+
+def has_acceptance_contract(db, project_id: str, version: int) -> bool:
+    """Retain verification for old contracts without imposing them on new LLM builds.
+
+    Either artifact opts the version in, so an incomplete historical contract still
+    fails verification instead of silently bypassing its release gate.
+    """
+    return db.execute('''SELECT 1 FROM artifacts WHERE project_id=? AND version=?
+        AND path IN ('appspec.json', 'acceptance/manifest.json') LIMIT 1''',
+        (project_id, version)).fetchone() is not None
 
 
 @router.get('/projects')
@@ -461,6 +476,10 @@ async def verify_project(project_id: str, body: VerificationInput, user=Depends(
     version = body.version or project['current_version']
     if not version:
         raise HTTPException(409, 'Build an application before verifying')
+    with workspace_db(user['id']) as db:
+        if not has_acceptance_contract(db, project_id, version):
+            raise HTTPException(409, 'This version has no stored acceptance contract. '
+                                'Contract verification is available only for historical AppSpec versions.')
     selected = set(body.selected_check_ids) if body.selected_check_ids is not None else None
     try:
         if body.defer:
@@ -517,13 +536,6 @@ async def advance_project(project_id: str, body: StageInput, user=Depends(curren
         raise HTTPException(409, 'Autopilot is still building. Send feedback to pause it, or wait for it to finish.')
     if project['stage'] == 'deploy':
         return project_payload(user['id'], project_id)
-    if feature_enabled(FeatureFlag.APPSPEC_V1) and project['stage'] == 'build' and not project['current_version']:
-        with workspace_db(user['id']) as db:
-            spec = db.execute('''SELECT content FROM artifacts WHERE project_id=? AND path='appspec.json'
-                ORDER BY version DESC LIMIT 1''', (project_id,)).fetchone()
-        review = appspec_review(spec['content'] if spec else None, for_compilation=True)
-        if review['appspec_valid'] is False:
-            raise HTTPException(409, f'AppSpec requires correction before building: {review["appspec_error"]}')
     with control_db() as db:
         from .engine import provider_for_user
         provider = provider_for_user(db, user['id'])
@@ -555,9 +567,7 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
         async with project_lock(project_id):
             # An autopilot step may have finished while this waited; act on the stage the owner now sees.
             current = owned_project(user['id'], project_id)
-            builds_application = current['stage'] in {'build', 'review'} and (
-                current['current_version'] > 0 or not feature_enabled(FeatureFlag.APPSPEC_V1)
-            )
+            builds_application = current['stage'] in {'build', 'review'} and current['current_version'] > 0
             if builds_application:
                 await generate_stage(user['id'], project_id, provider, body.content + selection, revise=True)
             else:
@@ -671,6 +681,7 @@ async def forward_runtime(
             project_id, version, channel, source, requirements, request.method, path,
             request.url.query, body, request.headers.get('content-type', ''),
             source_format=source_format, files=files,
+            authorization=request.headers.get('authorization', ''),
         )
     except RuntimeLaunchError as exc:
         detail = ('The application backend is temporarily unavailable. Please try again shortly.'
@@ -709,20 +720,16 @@ async def restart_runtime(project_id: str, version: int | None = None, user=Depe
     return result
 
 
-@router.api_route('/projects/{project_id}/runtime/{version}/{path:path}',
-                  methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])
-async def preview_runtime(project_id: str, version: int, path: str, request: Request, user=Depends(current_user)):
-    owned_project(user['id'], project_id)
-    return await forward_runtime(request, user['id'], project_id, version, 'preview', path)
-
-
 @router.post('/projects/{project_id}/publish')
 async def publish_project(project_id: str, body: PublishInput, user=Depends(current_user)):
     project = owned_project(user['id'], project_id)
     version = body.version or project['current_version']
     if not version:
         raise HTTPException(409, 'Build at least one version before publishing')
-    if feature_enabled(FeatureFlag.ACCEPTANCE_GATE_V1) and project['published_version'] != version:
+    with workspace_db(user['id']) as db:
+        requires_verification = (feature_enabled(FeatureFlag.ACCEPTANCE_GATE_V1)
+                                 and has_acceptance_contract(db, project_id, version))
+    if requires_verification and project['published_version'] != version:
         try:
             report = await verify_package(user['id'], project_id, version, force=True)
         except JobCancelledError as exc:
@@ -767,12 +774,8 @@ def version_artifacts(user_id: int, project_id: str, version: int) -> dict[str, 
 
 
 @router.get('/projects/{project_id}/package')
-async def download_package(project_id: str, access_token: str, version: int | None = None):
-    from .security import decode_token
-    try:
-        user_id = decode_token(access_token)
-    except Exception as exc:
-        raise HTTPException(401, 'A valid download session is required') from exc
+async def download_package(project_id: str, version: int | None = None, user=Depends(current_user)):
+    user_id = user['id']
     project = owned_project(user_id, project_id)
     version = version or project['current_version']
     if version_source_format(user_id, project_id, version) != 'multi-file':
@@ -791,16 +794,7 @@ async def download_package(project_id: str, access_token: str, version: int | No
     })
 
 
-@router.get('/projects/{project_id}/assets/{path:path}')
-async def preview_asset(project_id: str, path: str, request: Request, version: int | None = None, access_token: str | None = None):
-    from .security import decode_token
-    token = access_token or request.cookies.get('forma_preview')
-    try:
-        user_id = decode_token(token or '')
-    except Exception as exc:
-        raise HTTPException(401, 'A valid preview session is required') from exc
-    project = owned_project(user_id, project_id)
-    version = version or int(request.cookies.get('forma_preview_version') or project['current_version'])
+async def preview_asset(user_id: int, project_id: str, version: int, path: str):
     if version_source_format(user_id, project_id, version) != 'multi-file':
         raise HTTPException(404, 'This version has no built frontend assets')
     try:
@@ -827,23 +821,63 @@ async def get_version(project_id: str, version: int, user=Depends(current_user))
     return {'html': artifact['content']}
 
 
-PICKER_SCRIPT = '''<script>
-let picking=false,last=null;function path(el){if(el.id)return '#'+CSS.escape(el.id);let a=[];while(el&&el.nodeType===1&&a.length<4){let s=el.localName;if(el.classList.length)s+='.'+Array.from(el.classList).slice(0,2).map(CSS.escape).join('.');a.unshift(s);el=el.parentElement}return a.join(' > ')}
-window.addEventListener('message',e=>{if(e.data?.type==='forma-picker'){picking=e.data.enabled;document.body.style.cursor=picking?'crosshair':''}});
-document.addEventListener('mouseover',e=>{if(!picking)return;if(last)last.style.outline='';last=e.target;last.style.outline='2px solid #f97316'},true);
-document.addEventListener('click',e=>{if(!picking)return;e.preventDefault();e.stopPropagation();parent.postMessage({type:'forma-selection',selection:{selector:path(e.target),text:(e.target.innerText||e.target.value||'').slice(0,160)}},'*');picking=false;document.body.style.cursor='';if(last)last.style.outline=''},true);
-</script>'''
-
-
-@router.get('/projects/{project_id}/preview', response_class=HTMLResponse)
-async def preview_project(project_id: str, access_token: str, version: int | None = None):
-    from .security import decode_token
+@router.get('/projects/{project_id}/versions/{version}/context')
+def get_generation_context(project_id: str, version: int, user=Depends(current_user)):
+    owned_project(user['id'], project_id)
+    with workspace_db(user['id']) as db:
+        row = db.execute('SELECT generation_context FROM versions WHERE project_id=? AND version=?',
+                         (project_id, version)).fetchone()
+    if row is None:
+        raise HTTPException(404, 'Version not found')
     try:
-        user_id = decode_token(access_token)
+        context = read_version_context(row['generation_context'])
+    except GenerationError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {'version': version, 'recorded': context is not None, 'context': context}
+
+
+PICKER_SCRIPT = '''<script>(function(){
+const studioOrigin=__STUDIO_ORIGIN__;
+let picking=false,last=null;function path(el){if(el.id)return '#'+CSS.escape(el.id);let a=[];while(el&&el.nodeType===1&&a.length<4){let s=el.localName;if(el.classList.length)s+='.'+Array.from(el.classList).slice(0,2).map(CSS.escape).join('.');a.unshift(s);el=el.parentElement}return a.join(' > ')}
+window.addEventListener('message',e=>{if(e.source===parent&&e.origin===studioOrigin&&e.data?.type==='forma-picker'){picking=e.data.enabled===true;document.body.style.cursor=picking?'crosshair':''}});
+document.addEventListener('mouseover',e=>{if(!picking)return;if(last)last.style.outline='';last=e.target;last.style.outline='2px solid #f97316'},true);
+document.addEventListener('click',e=>{if(!picking)return;e.preventDefault();e.stopPropagation();parent.postMessage({type:'forma-selection',selection:{selector:path(e.target),text:(e.target.innerText||e.target.value||'').slice(0,160)}},studioOrigin);picking=false;document.body.style.cursor='';if(last)last.style.outline=''},true);
+})();</script>'''
+
+
+@router.post('/projects/{project_id}/preview-session')
+def preview_session(project_id: str, request: Request, response: Response, version: int | None = None, user=Depends(current_user)):
+    project = owned_project(user['id'], project_id)
+    selected = version if version is not None else project['current_version']
+    files = version_artifacts(user['id'], project_id, selected)
+    if not {'index.html', 'frontend/index.html'} & files.keys():
+        raise HTTPException(404, 'No application preview is available yet')
+    parent_origin = request.headers.get('origin', settings.studio_base_url).rstrip('/')
+    if parent_origin not in studio_origins():
+        raise HTTPException(403, 'Preview sessions must be opened from the studio')
+    token, expires = create_preview_token(user['id'], project_id, selected, parent_origin)
+    response.headers['Cache-Control'] = 'no-store'
+    return {'url': preview_url(project_id, selected, token),
+            'origin': application_origin(project_id, selected), 'expires_at': expires,
+            'project_id': project_id, 'version': selected}
+
+
+def preview_owner(project_id: str, version: int, token: str) -> dict:
+    try:
+        grant = decode_preview_token(token, project_id, version)
+        user_id = int(grant['sub'])
     except Exception as exc:
         raise HTTPException(401, 'A valid preview session is required') from exc
-    project = owned_project(user_id, project_id)
-    version = version or project['current_version']
+    with control_db() as db:
+        user = db.execute('SELECT status FROM users WHERE id=?', (user_id,)).fetchone()
+    if not user or user['status'] != 'active':
+        raise HTTPException(401, 'This account is not active')
+    owned_project(user_id, project_id)
+    version_source_format(user_id, project_id, version)
+    return grant
+
+
+async def preview_project(user_id: int, project_id: str, version: int, parent_origin: str, api_prefix: str):
     with workspace_db(user_id) as db:
         artifact = db.execute('SELECT content FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, 'index.html', version)).fetchone()
     source_format = version_source_format(user_id, project_id, version)
@@ -859,11 +893,7 @@ async def preview_project(project_id: str, access_token: str, version: int | Non
     else:
         html = artifact['content']
     if version_backend_mode(user_id, project_id, version) == 'fastapi':
-        html = inject_runtime_bootstrap(html, project_id, version, published=False)
-    html = html.replace('</body>', PICKER_SCRIPT + '</body>')
-    response = HTMLResponse(html, headers={'Cache-Control': 'no-store', 'Content-Security-Policy': "frame-ancestors 'self' http://localhost:5173"})
-    response.set_cookie('forma_preview', access_token, max_age=settings.access_token_days * 86400,
-                        path=f'/api/projects/{project_id}', httponly=True, samesite='lax')
-    response.set_cookie('forma_preview_version', str(version), max_age=settings.access_token_days * 86400,
-                        path=f'/api/projects/{project_id}', httponly=True, samesite='lax')
-    return response
+        html = inject_runtime_bootstrap(html, project_id, version, published=False, api_prefix=api_prefix)
+    picker = PICKER_SCRIPT.replace('__STUDIO_ORIGIN__', json.dumps(parent_origin).replace('<', '\\u003c'))
+    html = html.replace('</body>', picker + '</body>') if '</body>' in html else html + picker
+    return HTMLResponse(html, headers={'Cache-Control': 'no-store'})

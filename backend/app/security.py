@@ -34,6 +34,28 @@ def decode_token(token: str) -> int:
     return int(payload['sub'])
 
 
+def _preview_key() -> bytes:
+    return hmac.digest(settings.secret_key.encode(), b'forma:preview:v1', 'sha256')
+
+
+def create_preview_token(user_id: int, project_id: str, version: int, parent_origin: str) -> tuple[str, int]:
+    now = datetime.now(timezone.utc)
+    expires = int((now + timedelta(minutes=settings.preview_token_minutes)).timestamp())
+    token = jwt.encode({
+        'sub': str(user_id), 'project': project_id, 'version': version,
+        'parent_origin': parent_origin, 'aud': 'forma-preview', 'iat': now, 'exp': expires,
+    }, _preview_key(), algorithm='HS256')
+    return token, expires
+
+
+def decode_preview_token(token: str, project_id: str, version: int) -> dict:
+    payload = jwt.decode(token, _preview_key(), algorithms=['HS256'], audience='forma-preview',
+                         options={'require': ['sub', 'project', 'version', 'parent_origin', 'iat', 'exp', 'aud']})
+    if payload['project'] != project_id or payload['version'] != version:
+        raise jwt.InvalidTokenError('Preview grant does not match this project version')
+    return payload
+
+
 def _fernet():
     key = hashlib.sha256(settings.secret_key.encode()).digest()
     return Fernet(base64.urlsafe_b64encode(key))

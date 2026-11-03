@@ -1,7 +1,6 @@
-"""Capture a reproducible v1.4 baseline without contacting an LLM provider."""
+"""Capture the current regression suites without contacting an LLM provider."""
 
 import argparse
-import asyncio
 from datetime import datetime, timezone
 import json
 import os
@@ -120,7 +119,7 @@ def write_baseline(
         report = BaselineReport(schema_version='1.2', generation=generation, **values)
     document = {
         'schema_version': report.schema_version,
-        **report.model_dump(mode='json', exclude={'schema_version'}),
+        **report.model_dump(mode='json', exclude={'schema_version'}, exclude_none=True),
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(document, indent=2) + '\n')
@@ -151,9 +150,6 @@ def capture(
         ),
         'provider_smoke': skipped('real-provider evaluation is opt-in and is not part of baseline capture'),
     }
-    if quality is None and not skip_generation:
-        from scripts.evaluate_generation import evaluate_generation_quality
-        quality = asyncio.run(evaluate_generation_quality())
     return write_baseline(output, suites, metadata=metadata, generation=quality)
 
 
@@ -161,14 +157,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--skip-browser', action='store_true', help='Skip Playwright while capturing backend and frontend units.')
     parser.add_argument('--skip-generation', action='store_true',
-                        help='Write a suite-only 1.1 report without generation-quality evaluation.')
+                        help='Compatibility option: captures are suite-only unless --generation-report is supplied.')
     parser.add_argument('--generation-report', type=Path,
-                        help='Reuse a validated generation.json instead of rerunning quality evaluation.')
+                        help='Attach a validated historical generation.json; the retired compiler is never executed.')
     parser.add_argument('--check', action='store_true',
                         help='Compare the output baseline with the accepted reference without running suites.')
     parser.add_argument('--reference', type=Path,
                         default=ROOT / 'backend' / 'tests' / 'evals' / 'baseline.json')
-    parser.add_argument('--output', type=Path, default=ROOT / 'backend' / 'tests' / 'evals' / 'baseline.json')
+    parser.add_argument('--output', type=Path, default=ROOT / 'backend' / 'tests' / 'evals' / 'current-baseline.json')
     parser.add_argument('--schema-output', type=Path,
                         default=ROOT / 'backend' / 'tests' / 'evals' / 'baseline.schema.json')
     parser.add_argument('--write-schema', action='store_true', help='Write the current JSON Schema without running tests.')

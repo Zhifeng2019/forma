@@ -17,6 +17,7 @@ export default defineConfig({
     {
       command: `/Users/zhifengzhang/python_env/env_ai_build/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port ${backendPort}`,
       cwd: '../backend', url: `${backendUrl}/api/health`, reuseExistingServer, timeout: 30_000,
+      env: { STUDIO_BASE_URL: backendUrl, APPS_BASE_URL: `http://apps.localhost:${backendPort}`, CORS_ORIGINS: frontendUrl },
     },
     {
       command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort}`,

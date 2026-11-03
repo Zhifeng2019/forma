@@ -10,6 +10,8 @@ from .jobs.recovery import recover_all_workspaces, recovery_loop
 from .deployment_registry import deployment_artifacts, get_deployment
 from .llm import GenerationError
 from .api import cancel_generation_jobs, forward_runtime, router
+from .api import preview_asset, preview_owner, preview_project
+from .app_origins import ApplicationOriginMiddleware
 from .runtime import inject_runtime_bootstrap, runtime_manager
 from .frontend_builder import PackageBuildError, ensure_frontend_build, frontend_asset_path
 
@@ -28,14 +30,35 @@ async def lifespan(_app):
 
 
 app = FastAPI(title='Forma — AI Product Studio', version='1.3.0', lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(','),
+app.add_middleware(CORSMiddleware, allow_origins=[origin.strip().rstrip('/') for origin in settings.cors_origins.split(',')],
                    allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
+app.add_middleware(ApplicationOriginMiddleware)
 app.include_router(router)
 
 
 @app.get('/api/health')
 def health():
     return {'status': 'ok', 'service': 'forma'}
+
+
+@app.get('/preview/{project_id}/{version}/{token}/', response_class=HTMLResponse)
+async def isolated_preview(project_id: str, version: int, token: str):
+    grant = preview_owner(project_id, version, token)
+    return await preview_project(int(grant['sub']), project_id, version, grant['parent_origin'],
+                                 f'/preview/{project_id}/{version}/{token}/api')
+
+
+@app.get('/preview/{project_id}/{version}/{token}/assets/{path:path}')
+async def isolated_preview_asset(project_id: str, version: int, token: str, path: str):
+    grant = preview_owner(project_id, version, token)
+    return await preview_asset(int(grant['sub']), project_id, version, path)
+
+
+@app.api_route('/preview/{project_id}/{version}/{token}/api/{path:path}',
+               methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])
+async def isolated_preview_runtime(project_id: str, version: int, token: str, path: str, request: Request):
+    grant = preview_owner(project_id, version, token)
+    return await forward_runtime(request, int(grant['sub']), project_id, version, 'preview', path)
 
 
 def published_app(project_id: str):

@@ -1,8 +1,47 @@
 # Forma Studio v1.4 — Implementation Tracker
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-11-03
 
-**Current focus:** Owner retry of verification with symlink-safe snapshots
+**Current focus:** Reviewed planning inputs drive source-based LLM generation; generated apps remain isolated from the studio session.
+
+The AppSpec proposal/compiler/source-synthesis implementation and specialist-worker synthesis
+have been removed, along with their runtime switches. Builds, refinements, and migrations use
+application source. Stored contracts and reports remain compatible with historical verification;
+new source versions do not require the retired compiler to publish. Durable jobs and Docker
+sandboxing remain independent. Optional advisory review is requested explicitly.
+
+Compiler-only tests and the live compiler-quality evaluator were retired. Historical runtime,
+verification, cancellation, and provenance tests use frozen package fixtures; new regression tests
+cover obsolete environment variables and migration from historical versions.
+
+Generated pages now use dedicated origins: one per public application and one per preview
+version. Strict host routing prevents generated content on studio hosts and studio APIs on app
+hosts. Preview grants last 15 minutes by default, bind the owner/project/version, use a separate
+signing key, and check account status on every request. The frontend renews grants, validates
+picker message origins and senders, and downloads packages using authorization headers.
+Old query-token preview/runtime routes are removed; old public GET links redirect to the
+canonical app address. Local wildcard hosts and production DNS/TLS requirements are in README.md.
+
+Planning handoffs now pass reviewed upstream documents to design, planning, and revisions, and
+all three planning documents to source generation and architecture migrations. Each new app
+version records an immutable input snapshot, document content hashes, and the selected phase.
+Later source versions inherit those document revisions. Older versions retain an explicitly
+unrecorded history; schema upgrades do not reconstruct prior inputs. Snapshot rollback preserves
+the new metadata, and durable job identities include the relevant planning inputs.
+
+Before the first build, feedback revises the plan without creating source or advancing a phase.
+The studio displays the plan for review; the explicit build action starts phase 1. Autopilot
+feedback pauses at the same review boundary. Planning documents are excluded from source overlays
+and cannot be rewritten through generated package files. The owner can inspect version input
+history through `/api/projects/<id>/versions/<version>/context`.
+
+Validation: 242 backend tests passed with one Docker smoke test skipped; the frontend's 20 unit
+tests and production build passed. Six browser workflow scenarios passed, including manual plan
+review, both app formats, architecture migration, publishing, and package download. Controlled
+model responses verify the exact documents and phase instructions sent to the LLM.
+
+**Historical record below:** The earlier AppSpec, SPEC, WRK, and compiler-quality milestones
+describe the retired implementation. They are not instructions to restore it or enable old flags.
 
 **Status legend:** `[x]` accepted and verified · `[ ]` not complete · **Partial** means useful foundations exist but the acceptance gate remains open
 
@@ -10,7 +49,7 @@ This is the persistent implementation record for the approved sequence:
 
 > Baseline → durable jobs → AppSpec → deterministic verification → specialist workers → runtime hardening and scale
 
-Do not mark a milestone complete until its acceptance gate is verified. Keep schemas additive, preserve published applications, and retain legacy behavior behind feature flags.
+Do not mark a milestone complete until its acceptance gate is verified. Preserve published applications. The retired compiler milestones below no longer define the active generation path.
 
 ## Latest completed increment — Snapshot dependency-link hang fix
 
@@ -152,7 +191,7 @@ All five increments are complete. Subsequent roadmap items, including RUN-02, DA
 - [x] **SPEC-01 — Versioned AppSpec schema.** Typed product, architecture, entity, API, frontend, dependency, manifest, and acceptance sections reject invalid references before compilation.
 - [x] **SPEC-02 — Deterministic package compiler.** Documented path aliases, allowed paths, ownership, size limits, reviewed dependencies, and deterministic source/spec hashes are implemented and tested.
 - [x] **SPEC-04 — Legacy adapter.** Existing single-file and multi-file packages are represented without regeneration while preserving source, architecture, and source format.
-- [x] **SPEC-05A — Dual-write generation.** With `APPSPEC_V1` enabled, new and migrated versions store `appspec.json` and `build-manifest.json`. Existing generators still produce source in this slice.
+- [x] **SPEC-05A — Dual-write generation.** With the now-removed AppSpec flag enabled, new and migrated versions store `appspec.json` and `build-manifest.json`. Existing generators still produce source in this slice.
 - [x] **SPEC-05B — Compatibility verification.** Both source formats and architectures, bidirectional migration, durable/deferred autopilot, flag-off behavior, real Vite preview, and deployment archives pass.
 
 **Status:** AppSpec is now the source contract when enabled; legacy generation remains available with the flag off. Next is optional contract review (SPEC-06), followed by deterministic verification.
@@ -285,7 +324,7 @@ The ID order is intentionally not the execution order. Fixtures supply BASE-01's
 
 ## Milestone 4 — Scoped specialist workers
 
-- [x] **WRK-01 — Scoped frontend/backend workers.** `backend/app/workers/` derives role-scoped tasks from AppSpec manifests, filters worker data by role, rejects credentials and out-of-scope/duplicate writes, and restricts provider credentials to the supervisor. The supervisor alone selects the shared API adapter or composed single-file HTML. `SPECIALIST_WORKERS_V1` enables deterministic supervised synthesis while preserving byte-identical source and spec hashes in both source formats.
+- [x] **WRK-01 — Scoped frontend/backend workers.** `backend/app/workers/` derives role-scoped tasks from AppSpec manifests, filters worker data by role, rejects credentials and out-of-scope/duplicate writes, and restricts provider credentials to the supervisor. The supervisor alone selects the shared API adapter or composed single-file HTML. The now-removed specialist-worker flag enabled deterministic supervised synthesis while preserving byte-identical source and spec hashes in both source formats.
 - [x] **WRK-02 — Supervised parallel execution and merge.** Independent tasks execute concurrently with plan-ordered results, exact scope validation, duplicate-write rejection, and no partial output after failure. Parent-job cancellation and worker failures trigger cooperative cancellation and shutdown. `WorkerExecution` records deterministic role/path/source-hash provenance in the build manifest without timestamps, and single/multi-file packages remain byte-equivalent to sequential generation.
 - [x] **WRK-03 — File-scoped repair.** `repair_worker_tasks` retries only failed task IDs with a strict attempt bound while retaining successful results and returning no partial package after permanent failure. `repair_worker_result` accepts only declared failed paths, requires exact text output, and proves unrelated source hashes remain unchanged. Worker completions record deterministic `repair_count` provenance, and same-batch success/failure handling prevents unnecessary reruns.
 - [x] **WRK-04 — Optional non-gating review.** `include_review` generates a separate `acceptance/model-review.json` after deterministic verification, using supervisor-only credentials and bounded/redacted suggestions. Review completion, failure, cancellation, disabled mode, and missing providers never change `acceptance/report.json`, `status`, `can_publish`, or release gates. The Verification panel labels review as advisory and exposes no approval action.

@@ -46,8 +46,8 @@ def provider():
     }
 
 
-def enabled(specialist=True):
-    return Settings(acceptance_gate_v1=True, specialist_workers_v1=specialist)
+def enabled():
+    return Settings(acceptance_gate_v1=True)
 
 
 def test_review_is_opt_in_and_cannot_override_failed_release(monkeypatch):
@@ -94,7 +94,7 @@ def test_review_failure_does_not_change_passed_release(monkeypatch):
     assert 'review unavailable' in report['review']['error']
 
 
-def test_local_and_disabled_review_are_explicit_and_non_gating():
+def test_missing_provider_is_explicit_and_non_gating():
     user_id = 960502
     project_id = verification_project(user_id, [dummy_check()])
     local = asyncio.run(verify_package(
@@ -102,8 +102,3 @@ def test_local_and_disabled_review_are_explicit_and_non_gating():
     ))
     assert local['can_publish'] is True
     assert local['review']['status'] == 'unavailable' and local['review']['gating'] is False
-    disabled = asyncio.run(verify_package(
-        user_id, project_id, 1, config=enabled(False), provider=provider(), include_review=True,
-    ))
-    assert disabled['can_publish'] is True
-    assert disabled['review']['status'] == 'disabled' and disabled['review']['gating'] is False

@@ -1,3 +1,5 @@
+from app.app_origins import published_url
+from fixtures.preview import open_preview
 import json
 import subprocess
 import time
@@ -82,18 +84,17 @@ def test_fastapi_preview_crud_publish_and_cleanup():
         paths = {artifact['path'] for artifact in project['artifacts']}
         assert {'index.html', 'backend/main.py', 'backend/requirements.txt'} <= paths
 
-        preview = client.get(f'/api/projects/{project_id}/preview?access_token={token}')
+        preview = open_preview(client, project_id, token)
         assert preview.status_code == 200
         assert 'window.Forma=Object.freeze' in preview.text
-        assert f'/api/projects/{project_id}/runtime/1' in preview.text
+        assert preview.url.path in preview.text
         assert 'forma-picker' in preview.text
         status = client.get(f'/api/projects/{project_id}/runtime', headers=auth(token)).json()
         assert status['status'] == 'stopped'
         assert client.get(f'/apps/{project_id}/api/health').status_code == 404
 
-        private_api = f'/api/projects/{project_id}/runtime/1'
-        assert client.get(f'{private_api}/health').status_code == 401
-        response = client.get(f'{private_api}/health', headers=auth(token))
+        private_api = f'{preview.url}api'
+        response = client.get(f'{private_api}/health')
         assert response.status_code == 200, response.text
         assert response.json()['status'] == 'ok'
         assert response.json()['service'] == 'Shared Priorities'
@@ -110,21 +111,21 @@ def test_fastapi_preview_crud_publish_and_cleanup():
         assert verified.returncode == 0, verified.stderr
         assert str(environment) in verified.stdout
 
-        response = client.post(f'{private_api}/items', headers=auth(token), json={'title': 'Verify the release'})
+        response = client.post(f'{private_api}/items', json={'title': 'Verify the release'})
         assert response.status_code == 201, response.text
         item = response.json()
-        response = client.patch(f'{private_api}/items/{item["id"]}', headers=auth(token), json={'completed': True})
+        response = client.patch(f'{private_api}/items/{item["id"]}', json={'completed': True})
         assert response.status_code == 200
         assert response.json()['completed'] == 1
 
         response = client.post(f'/api/projects/{project_id}/runtime/restart', headers=auth(token))
         assert response.status_code == 200, response.text
         assert response.json()['healthy'] is True
-        items = client.get(f'{private_api}/items', headers=auth(token)).json()['items']
+        items = client.get(f'{private_api}/items').json()['items']
         assert any(row['title'] == 'Verify the release' and row['completed'] == 1 for row in items)
 
         other_token = register(client, 'not-the-owner@example.com')
-        assert client.get(f'{private_api}/items', headers=auth(other_token)).status_code == 404
+        assert open_preview(client, project_id, other_token).status_code == 404
         response = client.post(f'/api/projects/{project_id}/publish', headers=auth(token), json={})
         assert response.status_code == 200, response.text
         public_html = client.get(f'/apps/{project_id}/')
@@ -136,13 +137,13 @@ def test_fastapi_preview_crud_publish_and_cleanup():
         public_items = client.get(f'/apps/{project_id}/api/items')
         assert public_items.status_code == 200
         assert any(row['title'] == 'Verify the release' for row in public_items.json()['items'])
-        response = client.post(f'/apps/{project_id}/api/items', json={'title': 'Created through the public API'})
+        response = client.post(f'{published_url(project_id)}api/items', json={'title': 'Created through the public API'})
         assert response.status_code == 201, response.text
 
         assert client.post(f'/api/projects/{project_id}/unpublish', headers=auth(token)).status_code == 200
         assert client.get(f'/apps/{project_id}/api/health').status_code == 404
         assert client.get(f'/apps/{project_id}/').status_code == 404
-        assert client.get(f'{private_api}/items', headers=auth(token)).status_code == 200
+        assert client.get(f'{private_api}/items').status_code == 200
 
         assert client.delete(f'/api/projects/{project_id}', headers=auth(token)).status_code == 200
         assert not (settings.data_path / 'projects' / project_id).exists()
@@ -178,9 +179,9 @@ def test_architecture_migration_preserves_history_and_published_version():
         assert project['versions'][0]['label'] == 'FastAPI migration'
         assert client.get(f'/apps/{project_id}/api/health').status_code == 404
         assert 'privatePreview=false' not in client.get(f'/apps/{project_id}/').text
-        preview = client.get(f'/api/projects/{project_id}/preview?access_token={token}&version=2')
+        preview = open_preview(client, project_id, token, 2)
         assert 'window.Forma=Object.freeze' in preview.text
-        response = client.get(f'/api/projects/{project_id}/runtime/2/health', headers=auth(token))
+        response = client.get(f'{preview.url}api/health')
         assert response.status_code == 200, response.text
 
         response = client.post(f'/api/projects/{project_id}/publish', headers=auth(token), json={})
@@ -196,11 +197,11 @@ def test_architecture_migration_preserves_history_and_published_version():
         assert project['versions'][0]['backend_mode'] == 'static'
         assert client.get(f'/apps/{project_id}/api/health').status_code == 200
         assert 'privatePreview=false' in client.get(f'/apps/{project_id}/').text
-        old_fastapi_preview = client.get(f'/api/projects/{project_id}/preview?access_token={token}&version=2')
+        old_fastapi_preview = open_preview(client, project_id, token, 2)
         assert 'window.Forma=Object.freeze' in old_fastapi_preview.text
-        static_preview = client.get(f'/api/projects/{project_id}/preview?access_token={token}&version=3')
+        static_preview = open_preview(client, project_id, token, 3)
         assert 'window.Forma=Object.freeze' not in static_preview.text
-        assert client.get(f'/api/projects/{project_id}/runtime/3/health', headers=auth(token)).status_code == 409
+        assert client.get(f'{static_preview.url}api/health').status_code == 409
 
         response = client.post(f'/api/projects/{project_id}/publish', headers=auth(token), json={})
         assert response.status_code == 200

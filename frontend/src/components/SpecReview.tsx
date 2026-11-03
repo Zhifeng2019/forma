@@ -1,11 +1,6 @@
 import { CheckCircle2, Code2, Database, FileText, ListChecks, Package, ShieldCheck, XCircle } from 'lucide-react'
 import type { AppSpecEntityField, Project } from '../types'
 
-export function contractApprovalError(project: Project) {
-  if (!project.appspec_enabled || project.appspec_valid !== false) return ''
-  return project.appspec_error || 'The AppSpec contract is invalid. Revise it before building.'
-}
-
 function constraints(field: AppSpecEntityField) {
   const values = Object.entries(field.constraints || {})
   return values.length ? values.map(([key, value]) => `${key}: ${value}`).join(' · ') : '—'
@@ -13,18 +8,18 @@ function constraints(field: AppSpecEntityField) {
 
 export function SpecReview({ project }: { project: Project }) {
   if (project.appspec_valid === false) {
-    return <div className="spec-review"><div className="spec-invalid" role="alert"><XCircle size={24} /><div><span className="eyebrow">CONTRACT VALIDATION FAILED</span><h2>AppSpec needs correction.</h2><p>{contractApprovalError(project)}</p><small>Review the error and ask Forma to revise the contract. Invalid AppSpecs cannot proceed to compilation.</small></div></div></div>
+    return <div className="spec-review"><div className="spec-invalid" role="alert"><XCircle size={24} /><div><span className="eyebrow">CONTRACT VALIDATION FAILED</span><h2>Stored contract could not be read.</h2><p>{project.appspec_error || 'The stored contract is invalid.'}</p><small>This saved contract does not block new builds. You can continue from the existing application.</small></div></div></div>
   }
   const envelope = project.appspec
   if (!envelope) {
-    return <div className="spec-review"><div className="empty-state"><span><FileText size={27} /></span><h3>Your contract draft appears after planning</h3><p>Forma will define the product workflow, entity, API, dependencies, and acceptance checks here before the first build.</p></div></div>
+    return <div className="spec-review"><div className="empty-state"><span><FileText size={27} /></span><h3>No stored contract for this version</h3><p>Saved contracts remain available on the versions that created them.</p></div></div>
   }
   const spec = envelope.spec
   const artifact = project.artifacts.find(item => item.path === 'appspec.json')
   const architecture = spec.architecture
   return <div className="spec-review">
-    <header className="spec-heading"><div><span className="eyebrow">APPLICATION SPECIFICATION</span><h2>{spec.product.name}</h2><p>Review the typed contract that drives deterministic source generation.</p></div><span className="spec-valid"><CheckCircle2 size={14} />Schema &amp; hash verified</span></header>
-    <div className="spec-meta"><span>v{artifact?.version ?? 0}{artifact?.version === 0 ? ' · Review draft' : ''}</span><span>{architecture.backend_mode === 'fastapi' ? 'FastAPI' : 'Frontend only'}</span><span>{architecture.source_format}</span><span title={envelope.spec_hash}>Hash {envelope.spec_hash.slice(0, 12)}</span></div>
+    <header className="spec-heading"><div><span className="eyebrow">STORED APPLICATION SPECIFICATION</span><h2>{spec.product.name}</h2><p>Saved contract for this version. It is shown for reference and does not control new builds.</p></div><span className="spec-valid"><CheckCircle2 size={14} />Schema &amp; hash verified</span></header>
+    <div className="spec-meta"><span>v{artifact?.version ?? 0}{artifact?.version === 0 ? ' · Historical draft' : ''}</span><span>{architecture.backend_mode === 'fastapi' ? 'FastAPI' : 'Frontend only'}</span><span>{architecture.source_format}</span><span title={envelope.spec_hash}>Hash {envelope.spec_hash.slice(0, 12)}</span></div>
 
     <section className="spec-card spec-product"><header><ShieldCheck size={16} /><h3>Product contract</h3></header><p>{spec.product.brief}</p><dl><div><dt>Primary workflow</dt><dd>{spec.product.primary_workflow}</dd></div><div><dt>State ownership</dt><dd>{architecture.state_ownership === 'server' ? 'Server-owned persistent state' : 'Browser-local state'}</dd></div><div><dt>Frontend adapter</dt><dd>{spec.frontend.state_adapter}</dd></div><div><dt>Users</dt><dd>{spec.product.users.length ? spec.product.users.join(', ') : 'Not declared'}</dd></div></dl>{spec.product.acceptance_goals.length > 0 && <div className="spec-goals">{spec.product.acceptance_goals.map(goal => <span key={goal}>{goal}</span>)}</div>}</section>
 
@@ -32,7 +27,7 @@ export function SpecReview({ project }: { project: Project }) {
 
     <section className="spec-card"><header><Code2 size={16} /><h3>API operations <span>{spec.api.length}</span></h3></header>{spec.api.length ? <div className="spec-table-wrap"><table><caption className="sr-only">Declared API operations</caption><thead><tr><th>Method</th><th>Path</th><th>Operation</th><th>Entity</th></tr></thead><tbody>{spec.api.map(operation => <tr key={`${operation.method}-${operation.path}`}><td><span className={`spec-method ${operation.method.toLowerCase()}`}>{operation.method}</span></td><td><code>{operation.path}</code></td><td>{operation.name}</td><td>{operation.entity || '—'}</td></tr>)}</tbody></table></div> : <p className="spec-muted">No backend operations. This application uses browser-local state.</p>}</section>
 
-    <section className="spec-card"><header><Package size={16} /><h3>Reviewed dependencies</h3></header><div className="spec-dependencies"><div><h4>Python</h4>{spec.dependencies.python.length ? <ul>{spec.dependencies.python.map(item => <li key={item}>{item}</li>)}</ul> : <p>Base FastAPI stack only</p>}</div><div><h4>npm</h4>{spec.dependencies.npm.length ? <ul>{spec.dependencies.npm.map(item => <li key={item}>{item}</li>)}</ul> : <p>No npm dependencies</p>}</div></div><small>Versions are pinned by Forma at compilation, never selected by the model.</small></section>
+    <section className="spec-card"><header><Package size={16} /><h3>Reviewed dependencies</h3></header><div className="spec-dependencies"><div><h4>Python</h4>{spec.dependencies.python.length ? <ul>{spec.dependencies.python.map(item => <li key={item}>{item}</li>)}</ul> : <p>Base FastAPI stack only</p>}</div><div><h4>npm</h4>{spec.dependencies.npm.length ? <ul>{spec.dependencies.npm.map(item => <li key={item}>{item}</li>)}</ul> : <p>No npm dependencies</p>}</div></div><small>These dependencies were recorded when this version was built.</small></section>
 
     <section className="spec-card"><header><ListChecks size={16} /><h3>Acceptance checks <span>{spec.acceptance.length}</span></h3></header><ul className="spec-checks">{spec.acceptance.map(check => <li key={`${check.kind}-${check.target}-${check.name}`}><span>{check.kind}</span><div><strong>{check.name}</strong><code>{check.target}</code></div></li>)}</ul></section>
 

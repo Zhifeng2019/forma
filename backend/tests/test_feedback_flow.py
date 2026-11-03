@@ -92,3 +92,33 @@ def test_approving_release_does_not_regenerate(monkeypatch):
         assert (project['stage'], project['current_version']) == ('deploy', version)
         assert len(project['versions']) == version
         assert project['messages'][-1]['content'] == 'The release is approved. Publish it when you are ready.'
+
+
+@pytest.mark.parametrize('durable', [False, True])
+def test_feedback_pauses_autopilot_at_the_unbuilt_plan(monkeypatch, durable):
+    monkeypatch.setattr(settings, 'durable_jobs_v1', durable)
+    real = engine.generate_stage
+
+    async def delayed(*args, **kwargs):
+        await real(*args, **kwargs)
+        await asyncio.sleep(0.3)
+
+    monkeypatch.setattr(api_module, 'generate_stage', delayed)
+    with TestClient(app) as client:
+        token = register(client, f'plan-autopilot-{durable}')['token']
+        project_id = client.post('/api/projects', headers=auth(token), json={
+            'name': 'Plan Pause', 'brief': 'A personal invoice tracker.', 'backend_mode': 'static',
+            'source_format': 'single-file', 'auto_mode': True, 'defer': True,
+        }).json()['id']
+        poll(client, token, project_id, lambda p: p['stage'] == 'build' and p['current_version'] == 0 and p['status'] == 'ready')
+        response = client.post(f'/api/projects/{project_id}/messages', headers=auth(token),
+                               json={'content': 'Keep approval history in phase 1.', 'defer': True})
+        assert response.status_code == 200, response.text
+        project = poll(client, token, project_id, lambda p: not p['auto_mode'] and p['status'] == 'ready')
+        assert (project['stage'], project['phase_index'], project['current_version']) == ('build', 0, 0)
+        assert project['versions'] == []
+        assert 'Keep approval history in phase 1.' in next(
+            artifact['content'] for artifact in project['artifacts'] if artifact['path'] == 'plan.md'
+        )
+        response = client.post(f'/api/projects/{project_id}/advance', headers=auth(token), json={})
+        assert response.json()['current_version'] == 1

@@ -1,4 +1,4 @@
-"""Typed, backward-compatible v1.4 feature flags."""
+"""Independent job, historical-verification, and runtime feature flags."""
 
 from enum import StrEnum
 
@@ -7,9 +7,7 @@ from .config import Settings, settings
 
 class FeatureFlag(StrEnum):
     DURABLE_JOBS_V1 = 'durable_jobs_v1'
-    APPSPEC_V1 = 'appspec_v1'
     ACCEPTANCE_GATE_V1 = 'acceptance_gate_v1'
-    SPECIALIST_WORKERS_V1 = 'specialist_workers_v1'
     SANDBOX_V1 = 'sandbox_v1'
 
 

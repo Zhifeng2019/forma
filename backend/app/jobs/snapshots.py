@@ -68,10 +68,10 @@ def rollback_attempt_snapshot(snapshot: AttemptSnapshot) -> None:
         if snapshot.version_row:
             version = snapshot.version_row
             db.execute('''INSERT INTO versions(
-                project_id,version,label,note,backend_mode,source_format,created_at)
-                VALUES(?,?,?,?,?,?,?)''', (
+                project_id,version,label,note,backend_mode,source_format,created_at,generation_context)
+                VALUES(?,?,?,?,?,?,?,?)''', (
                 snapshot.project_id, version['version'], version['label'], version['note'],
-                version['backend_mode'], version['source_format'], version['created_at'],
+                version['backend_mode'], version['source_format'], version['created_at'], version.get('generation_context'),
             ))
         for artifact in snapshot.artifacts:
             db.execute('''INSERT INTO artifacts(project_id,stage,path,content,version,created_at)

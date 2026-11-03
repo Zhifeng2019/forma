@@ -3,6 +3,8 @@ import uuid
 
 import pytest
 
+from fixtures.archived_appspec import archived_package, spec_artifacts
+
 from app.config import Settings, settings
 from app.database import workspace_db, workspace_for
 from app.frontend_builder import staging_directory, version_directory
@@ -12,9 +14,6 @@ from app.jobs.leases import finalize_job, lease_next_job, request_cancellation
 from app.jobs.models import JobCancelledError, StaleJobError
 from app.jobs.runner import run_generation_job
 from app.jobs.service import create_job
-from app.spec.defaults import local_default_appspec
-from app.spec.compiler import compile_package
-from app.spec.service import spec_artifacts
 from app.verification.runner import verify_package
 
 OLD_REPORT = '{"status":"passed","can_publish":true,"previous":true}'
@@ -153,9 +152,7 @@ def test_finalization_rejects_wrong_worker_and_cancelled_state():
 def test_verify_package_rejects_cancelled_outcome(monkeypatch):
     user_id = 940004
     project_id = make_project(user_id)
-    package = compile_package(local_default_appspec(
-        'Cancelled Verification', 'Reject cancelled verification output', 'multi-file', 'static',
-    ))
+    package = archived_package('multi-file', 'static', phase=1)
     with workspace_db(user_id) as db:
         db.execute("UPDATE projects SET source_format='multi-file' WHERE id=?", (project_id,))
         db.execute("UPDATE versions SET source_format='multi-file' WHERE project_id=?", (project_id,))

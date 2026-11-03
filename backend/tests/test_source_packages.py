@@ -1,3 +1,4 @@
+from fixtures.preview import open_preview
 import io
 import json
 import re
@@ -151,20 +152,20 @@ def test_multi_file_package_preview_publish_and_download():
         assert 'frontend/src/App.jsx' in paths and 'backend/app/api.py' in paths
         assert project['versions'][0]['source_format'] == 'multi-file'
 
-        preview = client.get(f'/api/projects/{project_id}/preview?access_token={token}')
+        preview = open_preview(client, project_id, token)
         assert preview.status_code == 200, preview.text
         assert './assets/' in preview.text and 'window.Forma=Object.freeze' in preview.text
         assert 'forma-picker' in preview.text
         asset_match = re.search(r'(?:src|href)="(\./)?assets/([^"?]+)"', preview.text)
         assert asset_match
         asset_name = asset_match.group(2)
-        asset = client.get(f'/api/projects/{project_id}/assets/{asset_name}')
+        asset = client.get(f'{preview.url}assets/{asset_name}')
         assert asset.status_code == 200, asset.text
         assert len(asset.content) > 100
-        health = client.get(f'/api/projects/{project_id}/runtime/1/health', headers=auth(token))
+        health = client.get(f'{preview.url}api/health')
         assert health.status_code == 200, health.text
 
-        archive = client.get(f'/api/projects/{project_id}/package?access_token={token}')
+        archive = client.get(f'/api/projects/{project_id}/package', headers=auth(token))
         assert archive.status_code == 200, archive.text
         with zipfile.ZipFile(io.BytesIO(archive.content)) as package:
             names = set(package.namelist())

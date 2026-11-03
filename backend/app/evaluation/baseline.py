@@ -49,10 +49,11 @@ class Compatibility(ReportModel):
 
 
 class FeatureFlags(ReportModel):
+    # Retired keys are accepted only as historical report metadata, never runtime settings.
     durable_jobs_v1: bool
-    appspec_v1: bool
+    appspec_v1: bool | None = None
     acceptance_gate_v1: bool
-    specialist_workers_v1: bool
+    specialist_workers_v1: bool | None = None
     sandbox_v1: bool
 
 

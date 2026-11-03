@@ -16,7 +16,7 @@ SPEC_ARTIFACT_PATHS = (APPSPEC_PATH, BUILD_MANIFEST_PATH)
 
 
 class AppSpecError(GenerationError):
-    """An AppSpec cannot be validated or compiled under studio policy."""
+    """A stored AppSpec cannot be validated under its historical schema."""
 
 
 def parse_appspec(value: AppSpec | dict) -> AppSpec:

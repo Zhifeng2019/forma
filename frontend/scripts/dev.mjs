@@ -16,7 +16,10 @@ try {
   backend = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', backendPort], {
     cwd: backendRoot,
     stdio: 'inherit',
-    env: process.env,
+    env: { ...process.env, ...(process.env.FORMA_BACKEND_URL ? {
+      STUDIO_BASE_URL: process.env.STUDIO_BASE_URL || backendUrl,
+      APPS_BASE_URL: process.env.APPS_BASE_URL || `http://apps.localhost:${backendPort}`,
+    } : {}) },
   })
 }
 

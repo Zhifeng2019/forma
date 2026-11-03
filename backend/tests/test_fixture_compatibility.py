@@ -1,3 +1,5 @@
+from app.app_origins import published_url
+from fixtures.preview import open_preview
 from contextlib import contextmanager
 import json
 import os
@@ -46,8 +48,8 @@ def test_single_file_history_preview_and_public_release():
     token = create_token(result.user_id)
     with activated(workspace), TestClient(app) as client:
         public = client.get(f'/apps/{result.project_id}/')
-        current = client.get(f'/api/projects/{result.project_id}/preview?access_token={token}')
-        historical = client.get(f'/api/projects/{result.project_id}/preview?access_token={token}&version=1')
+        current = open_preview(client, result.project_id, token)
+        historical = open_preview(client, result.project_id, token, 1)
         assert public.status_code == 200 and 'Fixture version 1' in public.text
         assert current.status_code == 200 and 'Fixture version 2' in current.text
         assert historical.status_code == 200 and 'Fixture version 1' in historical.text
@@ -95,7 +97,7 @@ def test_multi_file_packages_build_and_fastapi_runs_from_fixture():
         assert f'/apps/{fastapi.project_id}/api' in fastapi_page.text
         health = client.get(f'/apps/{fastapi.project_id}/api/health')
         assert health.status_code == 200, health.text
-        created = client.post(f'/apps/{fastapi.project_id}/api/items', json={'title': 'Fixture CRUD'})
+        created = client.post(f'{published_url(fastapi.project_id)}api/items', json={'title': 'Fixture CRUD'})
         assert created.status_code == 201, created.text
         items = client.get(f'/apps/{fastapi.project_id}/api/items')
         assert items.status_code == 200
@@ -110,7 +112,7 @@ def test_single_file_fastapi_runs_health_and_crud_from_fixture():
         assert page.status_code == 200 and 'FastAPI fixture' in page.text
         health = client.get(f'/apps/{result.project_id}/api/health')
         assert health.status_code == 200, health.text
-        created = client.post(f'/apps/{result.project_id}/api/items', json={'title': 'Single-file CRUD'})
+        created = client.post(f'{published_url(result.project_id)}api/items', json={'title': 'Single-file CRUD'})
         assert created.status_code == 201, created.text
         items = client.get(f'/apps/{result.project_id}/api/items')
         assert [item['title'] for item in items.json()['items']] == ['Single-file CRUD']
@@ -163,8 +165,8 @@ def test_provider_fixtures_exercise_expected_contract_boundaries():
 
     native = provider_document(pack, 'native-fetch-adapter')['files']['index.html']
     project_id = 'f' * 32
-    injected = inject_runtime_bootstrap(native, project_id, 1, published=False)
-    assert 'nativeFetch' in injected and f'/api/projects/{project_id}/runtime/1' in injected
+    injected = inject_runtime_bootstrap(native, project_id, 1, published=False, api_prefix='/preview/example/1/grant/api')
+    assert 'nativeFetch' in injected and '/preview/example/1/grant/api' in injected
     assert "fetch('/api/health')" in injected
 
     previous = pack.package_files('static-multi')

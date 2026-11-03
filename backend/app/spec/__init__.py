@@ -1,7 +1,6 @@
-"""Versioned application specifications and deterministic package compilation."""
+"""Read-only compatibility with specifications stored by the retired AppSpec compiler."""
 
-from .compiler import CompiledPackage, compile_package
 from .schema import AppSpecError, appspec_hash, parse_appspec
 from .types import AppSpec
 
-__all__ = ['AppSpec', 'AppSpecError', 'CompiledPackage', 'appspec_hash', 'compile_package', 'parse_appspec']
+__all__ = ['AppSpec', 'AppSpecError', 'appspec_hash', 'parse_appspec']

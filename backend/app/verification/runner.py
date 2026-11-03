@@ -7,7 +7,6 @@ from pathlib import Path
 import re
 import sys
 import time
-from urllib.parse import quote
 
 from ..config import ROOT, Settings, settings
 from ..database import control_db, workspace_db
@@ -25,7 +24,8 @@ from ..jobs.service import record_event
 from ..jobs.tool_runs import finish_tool_run, start_tool_run
 from ..llm import GenerationError
 from ..runtime import runtime_manager
-from ..security import create_token
+from ..security import create_token, create_preview_token
+from ..app_origins import preview_url
 from ..spec.capabilities import assess_capabilities, capability_error
 from ..spec.review import appspec_review
 from ..spec.schema import APPSPEC_PATH, COMPILER_VERSION, parse_appspec
@@ -130,10 +130,11 @@ def _base_environment(user_id: int, project_id: str, version: int, context: dict
     evidence.mkdir(parents=True, exist_ok=True)
     token = create_token(user_id)
     studio = settings.studio_base_url.rstrip('/')
+    preview_token, _expires = create_preview_token(user_id, project_id, version, studio)
     env = {
         'APP_SOURCE_DIR': str(root),
         'APP_EVIDENCE_DIR': str(evidence),
-        'APP_PREVIEW_URL': f'{studio}/api/projects/{project_id}/preview?access_token={quote(token)}&version={version}',
+        'APP_PREVIEW_URL': preview_url(project_id, version, preview_token),
         'FORMA_BASE_URL': studio,
         'FORMA_TOKEN': token,
         'PROJECT_ID': project_id,
@@ -284,8 +285,16 @@ async def _execute_check(
                 await _run_studio_build(user_id, project_id, version, context)
             else:
                 command, cwd = _command_for_check(version_directory(project_id, version), check)
+                execution_env = dict(env)
+                if 'APP_PREVIEW_URL' in check['environment']:
+                    # Builds/dependency installs may outlast the initial grant.
+                    # Give each browser check a fresh grant for this exact version.
+                    preview_token, _expires = create_preview_token(
+                        user_id, project_id, version, settings.studio_base_url,
+                    )
+                    execution_env['APP_PREVIEW_URL'] = preview_url(project_id, version, preview_token)
                 returncode, output = await _execute_process(
-                    command, cwd, _process_environment(version_directory(project_id, version), env),
+                    command, cwd, _process_environment(version_directory(project_id, version), execution_env),
                     check['timeout'], run.id,
                 )
                 if returncode:
@@ -452,5 +461,5 @@ async def verify_package(
         if provider is None:
             with control_db() as db:
                 provider = provider_for_user(db, user_id)
-        report['review'] = await generate_model_review(user_id, project_id, version, report, provider, config)
+        report['review'] = await generate_model_review(user_id, project_id, version, report, provider)
     return report

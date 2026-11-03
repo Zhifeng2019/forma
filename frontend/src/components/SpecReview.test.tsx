@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { contractApprovalError, SpecReview } from './SpecReview'
+import { SpecReview } from './SpecReview'
 import type { AppSpecEnvelope, Project } from '../types'
 
 const envelope: AppSpecEnvelope = {
@@ -43,7 +43,7 @@ const project: Project = {
   backend_mode: 'fastapi', backend_reason: 'Shared data', backend_enabled: true, source_format: 'multi-file',
   published_version: null, created_at: '', updated_at: '', messages: [], versions: [], events: [],
   artifacts: [{ id: 1, path: 'appspec.json', stage: 'plan', content: '', version: 0, created_at: '' }],
-  appspec_enabled: true, appspec: envelope, appspec_valid: true, appspec_error: null,
+  appspec: envelope, appspec_valid: true, appspec_error: null,
 }
 
 describe('SpecReview', () => {
@@ -58,29 +58,21 @@ describe('SpecReview', () => {
     expect(html).toContain('react')
     expect(html).toContain('Production build')
     expect(html).toContain('frontend/src/App.jsx')
-    expect(html).toContain('Review draft')
+    expect(html).toContain('Historical draft')
   })
 
   it('renders a validation failure without the contract content', () => {
     const invalid = { ...project, appspec: null, appspec_valid: false, appspec_error: 'Broken contract' }
     const html = renderToStaticMarkup(<SpecReview project={invalid} />)
-    expect(html).toContain('AppSpec needs correction.')
+    expect(html).toContain('Stored contract could not be read.')
     expect(html).toContain('Broken contract')
-    expect(html).toContain('cannot proceed to compilation')
+    expect(html).toContain('does not block new builds')
     expect(html).not.toContain('/api/items')
   })
 
   it('explains when the draft is not available yet', () => {
     const empty = { ...project, appspec: null, appspec_valid: null, appspec_error: null }
     const html = renderToStaticMarkup(<SpecReview project={empty} />)
-    expect(html).toContain('contract draft appears after planning')
-  })
-})
-
-describe('contractApprovalError', () => {
-  it('blocks only an invalid contract with AppSpec enabled', () => {
-    expect(contractApprovalError({ ...project, appspec_valid: false, appspec_error: 'Broken contract' })).toBe('Broken contract')
-    expect(contractApprovalError(project)).toBe('')
-    expect(contractApprovalError({ ...project, appspec_enabled: false, appspec_valid: false })).toBe('')
+    expect(html).toContain('No stored contract for this version')
   })
 })

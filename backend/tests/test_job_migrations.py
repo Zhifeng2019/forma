@@ -3,6 +3,24 @@ import uuid
 from app.database import control_db, init_databases, workspace_db, workspace_for
 
 
+def test_existing_version_gains_nullable_context_without_rewriting_history():
+    user_id = 975101
+    with workspace_db(user_id) as db:
+        db.executescript('''CREATE TABLE versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, version INTEGER NOT NULL,
+            label TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', backend_mode TEXT NOT NULL DEFAULT 'static',
+            source_format TEXT NOT NULL DEFAULT 'single-file', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(project_id, version));''')
+        db.execute("INSERT INTO versions(project_id,version,label,note) VALUES('legacy',1,'Published','Keep this release')")
+        original = dict(db.execute('SELECT * FROM versions').fetchone())
+    workspace_for(user_id)
+    workspace_for(user_id)
+    with workspace_db(user_id) as db:
+        upgraded = dict(db.execute('SELECT * FROM versions').fetchone())
+        assert upgraded.pop('generation_context') is None
+        assert upgraded == original
+
+
 def test_additive_job_schema_and_published_registry_backfill():
     init_databases()
     user_id = 900001

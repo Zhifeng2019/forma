@@ -9,20 +9,15 @@ import time
 import uuid
 import zipfile
 
+from fixtures.archived_appspec import archived_package, spec_artifacts
+
 from app.config import settings
 from app.frontend_builder import _digest
-from app.spec.compiler import compile_package
-from app.spec.defaults import local_default_appspec
-from app.spec.legacy_adapter import legacy_appspec
-from app.spec.service import spec_artifacts
-from app.source_packages import local_source_package
 from app.verification.manifest import acceptance_artifacts
 
 
 def compiled(backend='fastapi', source_format='multi-file', phase=2):
-    return compile_package(local_default_appspec(
-        'Acceptance App', 'Verify the complete application contract.', source_format, backend,
-    ), phase=phase)
+    return archived_package(source_format, backend, phase)
 
 
 def manifest(artifacts):
@@ -81,12 +76,7 @@ def test_static_and_legacy_specs_generate_only_applicable_checks():
     assert 'No backend API operations' in static['acceptance/api_tests.py']
     compile(static['acceptance/security_tests.py'], 'acceptance/security_tests.py', 'exec')
 
-    project = {
-        'name': 'Legacy Acceptance', 'brief': 'Preserve a legacy package.',
-        'backend_mode': 'fastapi', 'source_format': 'multi-file',
-    }
-    files = local_source_package(project['name'], project['brief'], 1, 'fastapi')
-    legacy = compile_package(legacy_appspec(project, files), files)
+    legacy = archived_package(fixture='scoped-source')
     artifacts = acceptance_artifacts(legacy)
     legacy_ids = {check['id'] for check in manifest(artifacts)['checks']}
     assert 'api.health' in legacy_ids and 'api.crud' not in legacy_ids
