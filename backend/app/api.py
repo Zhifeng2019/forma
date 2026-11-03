@@ -33,6 +33,19 @@ from .deployment_registry import delete_deployment, upsert_deployment
 
 router = APIRouter(prefix='/api')
 _generation_jobs: dict[asyncio.Task, tuple[int, str]] = {}
+_project_locks: dict[str, asyncio.Lock] = {}
+# Projects whose autopilot is still running, mapped to whether the owner asked it to pause.
+_autopilot: dict[str, bool] = {}
+
+
+def project_lock(project_id: str) -> asyncio.Lock:
+    """Serialize generation per project so user feedback never interleaves with an autopilot step."""
+    return _project_locks.setdefault(project_id, asyncio.Lock())
+
+
+async def _locked(project_id: str, coroutine) -> None:
+    async with project_lock(project_id):
+        await coroutine
 
 
 def schedule_generation(user_id: int, project_id: str, coroutine) -> asyncio.Task:
@@ -319,13 +332,31 @@ async def create_project(body: ProjectInput, user=Depends(current_user)):
         provider = provider_for_user(db, user['id'])
 
     async def run_creation() -> None:
-        await generate_stage(user['id'], project_id, provider)
         if body.auto_mode:
-            for _ in range(5):
-                current = project_payload(user['id'], project_id)
-                if current['stage'] not in {'design', 'plan', 'build'} or current['status'] == 'error':
-                    break
+            _autopilot[project_id] = False
+        try:
+            async with project_lock(project_id):
                 await generate_stage(user['id'], project_id, provider)
+            if body.auto_mode:
+                for _ in range(5):
+                    async with project_lock(project_id):
+                        current = project_payload(user['id'], project_id)
+                        if current['stage'] not in {'design', 'plan', 'build'} or current['status'] == 'error':
+                            break
+                        if _autopilot.get(project_id):
+                            # Feedback applies to what the owner reviewed; they resume by approving.
+                            with workspace_db(user['id']) as db:
+                                db.execute('UPDATE projects SET auto_mode=0 WHERE id=?', (project_id,))
+                                add_message(db, project_id, 'agent', 'Autopilot paused so your feedback is applied '
+                                            'to the current step. Approve it when you are ready to continue.', 'chat')
+                            break
+                        # Claim the step before yielding so feedback cannot slip in and land after it.
+                        with workspace_db(user['id']) as db:
+                            db.execute("UPDATE projects SET status='working',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                                       (project_id,))
+                        await generate_stage(user['id'], project_id, provider)
+        finally:
+            _autopilot.pop(project_id, None)
 
     if body.defer:
         schedule_generation(user['id'], project_id, run_creation())
@@ -482,6 +513,8 @@ async def advance_project(project_id: str, body: StageInput, user=Depends(curren
     project = owned_project(user['id'], project_id)
     if project['status'] == 'working':
         raise HTTPException(409, 'The agent is already working')
+    if project_id in _autopilot:
+        raise HTTPException(409, 'Autopilot is still building. Send feedback to pause it, or wait for it to finish.')
     if project['stage'] == 'deploy':
         return project_payload(user['id'], project_id)
     if feature_enabled(FeatureFlag.APPSPEC_V1) and project['stage'] == 'build' and not project['current_version']:
@@ -497,9 +530,10 @@ async def advance_project(project_id: str, body: StageInput, user=Depends(curren
     if body.defer:
         with workspace_db(user['id']) as db:
             db.execute("UPDATE projects SET status='working',updated_at=CURRENT_TIMESTAMP WHERE id=?", (project_id,))
-        schedule_generation(user['id'], project_id, generate_stage(user['id'], project_id, provider, body.feedback))
+        schedule_generation(user['id'], project_id,
+                            _locked(project_id, generate_stage(user['id'], project_id, provider, body.feedback)))
     else:
-        await generate_stage(user['id'], project_id, provider, body.feedback)
+        await _locked(project_id, generate_stage(user['id'], project_id, provider, body.feedback))
     return project_payload(user['id'], project_id)
 
 
@@ -509,6 +543,8 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
     if project['status'] == 'working':
         raise HTTPException(409, 'The agent is already working')
     selection = safe_selector(body.selection)
+    if project_id in _autopilot:
+        _autopilot[project_id] = True
     with workspace_db(user['id']) as db:
         add_message(db, project_id, 'user', body.content + selection, metadata={'selection': body.selection or {}})
     with control_db() as db:
@@ -516,13 +552,16 @@ async def send_message(project_id: str, body: MessageInput, user=Depends(current
         provider = provider_for_user(db, user['id'])
 
     async def run_message() -> None:
-        builds_application = project['stage'] in {'build', 'review'} and (
-            project['current_version'] > 0 or not feature_enabled(FeatureFlag.APPSPEC_V1)
-        )
-        if builds_application:
-            await generate_stage(user['id'], project_id, provider, body.content + selection, revise=True)
-        else:
-            await revise_document(user['id'], project_id, provider, body.content)
+        async with project_lock(project_id):
+            # An autopilot step may have finished while this waited; act on the stage the owner now sees.
+            current = owned_project(user['id'], project_id)
+            builds_application = current['stage'] in {'build', 'review'} and (
+                current['current_version'] > 0 or not feature_enabled(FeatureFlag.APPSPEC_V1)
+            )
+            if builds_application:
+                await generate_stage(user['id'], project_id, provider, body.content + selection, revise=True)
+            else:
+                await revise_document(user['id'], project_id, provider, body.content)
 
     if body.defer:
         with workspace_db(user['id']) as db:
@@ -538,6 +577,8 @@ async def change_architecture(project_id: str, body: ArchitectureInput, user=Dep
     project = owned_project(user['id'], project_id)
     if project['status'] == 'working':
         raise HTTPException(409, 'Wait for the current generation to finish before migrating')
+    if project_id in _autopilot:
+        raise HTTPException(409, 'Wait for autopilot to finish before migrating')
     if project['backend_mode'] == body.target_mode:
         raise HTTPException(409, f'This project already uses {body.target_mode} architecture')
     with control_db() as db:

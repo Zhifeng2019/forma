@@ -68,6 +68,36 @@ def parse_json(text: str) -> dict:
 
 MAX_OUTPUT_TOKENS = 32_768
 OUTPUT_REPAIR_ATTEMPTS = 1
+TRANSIENT_RETRIES = 2
+TRANSIENT_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
+MAX_RETRY_DELAY_SECONDS = 30.0
+# Provider endpoints and models that rejected strict json_schema output in this process.
+_SCHEMA_UNSUPPORTED: set[tuple[str, str]] = set()
+
+
+def _schema_key(provider: dict) -> tuple[str, str]:
+    return provider['base_url'].rstrip('/'), provider['model']
+
+
+def _retry_delay(response, attempt: int) -> float:
+    """Honor Retry-After when the provider sends seconds; otherwise back off exponentially."""
+    headers = getattr(response, 'headers', None) or {}
+    try:
+        return min(MAX_RETRY_DELAY_SECONDS, max(0.0, float(headers.get('retry-after'))))
+    except (TypeError, ValueError):
+        return float(2 ** attempt)
+
+
+async def _pause_before_retry(delay: float) -> None:
+    context = current_job_context()
+    if not context:
+        await asyncio.sleep(delay)
+        return
+    try:
+        await asyncio.wait_for(context.cancellation.wait(), timeout=delay)
+    except TimeoutError:
+        return
+    context.raise_if_cancelled()
 
 
 def _inference_options(provider: dict) -> dict:
@@ -89,6 +119,8 @@ async def complete_with_schema(
     provider: dict, system: str, prompt: str, schema: dict, schema_name: str,
 ) -> dict:
     """Use native structured output when available, with one compatibility fallback."""
+    if provider and _schema_key(provider) in _SCHEMA_UNSUPPORTED:
+        return await _complete(provider, system, prompt, {'type': 'json_object'})
     response_format = {
         'type': 'json_schema',
         'json_schema': {'name': schema_name, 'strict': True, 'schema': schema},
@@ -167,31 +199,46 @@ async def _complete(
             continuation = False
             continuation_source = ''
             while attempt <= OUTPUT_REPAIR_ATTEMPTS:
-                response, tool_run = await _post_with_cancellation(client, url, {
-                    'headers': {'Authorization': f'Bearer {decrypt_secret(provider["api_key_encrypted"])}'},
-                    'json': {'model': provider['model'], 'messages': messages,
-                             'temperature': 0.35, 'response_format': response_format,
-                             'max_tokens': MAX_OUTPUT_TOKENS, **_inference_options(provider)},
-                }, tool_metadata={
-                    'input': {
-                        'provider': provider['name'], 'model': provider['model'],
-                        'response_format': response_format,
-                    },
-                    'retry_count': request_sequence,
-                    'provenance': {
-                        'provider': provider['name'], 'model': provider['model'],
-                        'response_format_type': response_format.get('type'),
-                        'schema_name': response_format.get('json_schema', {}).get('name'),
-                    },
-                })
-                record_observed_completion(
-                    provider, response, tool_run, response_format=response_format,
-                    request_reason=request_reason, reason_detail=reason_detail, retry_count=request_sequence,
-                )
-                request_sequence += 1
+                for transient_attempt in range(TRANSIENT_RETRIES + 1):
+                    try:
+                        response, tool_run = await _post_with_cancellation(client, url, {
+                            'headers': {'Authorization': f'Bearer {decrypt_secret(provider["api_key_encrypted"])}'},
+                            'json': {'model': provider['model'], 'messages': messages,
+                                     'temperature': 0.35, 'response_format': response_format,
+                                     'max_tokens': MAX_OUTPUT_TOKENS, **_inference_options(provider)},
+                        }, tool_metadata={
+                            'input': {
+                                'provider': provider['name'], 'model': provider['model'],
+                                'response_format': response_format,
+                            },
+                            'retry_count': request_sequence,
+                            'provenance': {
+                                'provider': provider['name'], 'model': provider['model'],
+                                'response_format_type': response_format.get('type'),
+                                'schema_name': response_format.get('json_schema', {}).get('name'),
+                            },
+                        })
+                    except httpx.TransportError as exc:
+                        # Dropped connections and timeouts are worth another try; other failures are not.
+                        if transient_attempt >= TRANSIENT_RETRIES:
+                            raise
+                        request_sequence += 1
+                        request_reason, reason_detail = 'transient_retry', type(exc).__name__
+                        await _pause_before_retry(_retry_delay(None, transient_attempt))
+                        continue
+                    record_observed_completion(
+                        provider, response, tool_run, response_format=response_format,
+                        request_reason=request_reason, reason_detail=reason_detail, retry_count=request_sequence,
+                    )
+                    request_sequence += 1
+                    if response.status_code not in TRANSIENT_STATUSES or transient_attempt >= TRANSIENT_RETRIES:
+                        break
+                    request_reason, reason_detail = 'transient_retry', f'HTTP {response.status_code}'
+                    await _pause_before_retry(_retry_delay(response, transient_attempt))
                 if response.status_code >= 400:
                     if (allow_json_fallback and response_format.get('type') == 'json_schema'
                             and response.status_code in {400, 404, 422}):
+                        _SCHEMA_UNSUPPORTED.add(_schema_key(provider))
                         response_format = {'type': 'json_object'}
                         request_reason = 'schema_fallback'
                         reason_detail = f'HTTP {response.status_code}'

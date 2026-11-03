@@ -20,19 +20,49 @@ class ProcessTimeoutError(TimeoutError):
     pass
 
 
+# Once the normal timeout passes, a process that keeps working gets this much more time per check.
+PROGRESS_WINDOW_SECONDS = 60.0
+MIN_PROGRESS_CPU_SECONDS = 1.0
+
+
 @dataclass(frozen=True)
 class ProcessResult:
     returncode: int
     output: str
 
 
-async def _read_output(stream: asyncio.StreamReader, limit: int) -> str:
+async def _read_output(stream: asyncio.StreamReader, limit: int, received: list[int] | None = None) -> str:
     output = bytearray()
     while chunk := await stream.read(4096):
+        if received is not None:
+            received[0] += len(chunk)
         output.extend(chunk)
         if len(output) > limit:
             del output[:-limit]
     return redact_output(output.decode(errors='replace'))
+
+
+def _cpu_seconds(text: str) -> float:
+    days, _, clock = text.rpartition('-')
+    seconds = 0.0
+    for part in clock.split(':'):
+        seconds = seconds * 60 + float(part)
+    return seconds + (int(days) * 86_400 if days else 0)
+
+
+def process_group_cpu_seconds(pgid: int) -> float | None:
+    """Total CPU time used by a process group, or None when it cannot be measured."""
+    try:
+        listing = subprocess.run(['ps', '-A', '-o', 'pgid=', '-o', 'time='],
+                                 capture_output=True, text=True, timeout=5, check=False).stdout
+        total = 0.0
+        for line in listing.splitlines():
+            fields = line.split()
+            if len(fields) == 2 and fields[0] == str(pgid):
+                total += _cpu_seconds(fields[1])
+        return total
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 async def terminate_process_group(process: asyncio.subprocess.Process, reader: asyncio.Task) -> None:
@@ -77,7 +107,13 @@ async def run_process(
     spec_hash: str | None = None,
     source_hash: str | None = None,
     telemetry_input=None,
+    max_timeout: float | None = None,
 ) -> ProcessResult:
+    """Run a command in its own process group.
+
+    After `timeout`, a process that produced output or used CPU since the last check keeps running in
+    PROGRESS_WINDOW_SECONDS steps until `max_timeout`; one that made no progress is stopped.
+    """
     if timeout <= 0:
         raise ValueError('Process timeout must be positive')
     if output_limit <= 0:
@@ -110,18 +146,38 @@ async def run_process(
     tool_run_id = tool_run_id or f'process-{uuid.uuid4().hex}'
     if context:
         context.own_tool(tool_run_id, process.pid)
-    reader = asyncio.create_task(_read_output(process.stdout, output_limit))
+    received = [0]
+    reader = asyncio.create_task(_read_output(process.stdout, output_limit, received))
     waiter = asyncio.create_task(process.wait())
     cancellation_waiter = asyncio.create_task(context.cancellation.wait()) if context else None
     try:
         pending = {waiter, *([cancellation_waiter] if cancellation_waiter else [])}
-        done, _ = await asyncio.wait(pending, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
-        if cancellation_waiter in done:
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        hard_deadline = started + max(timeout, max_timeout or timeout)
+        window = timeout
+        checked_output, checked_cpu = 0, 0.0
+        while True:
+            done, _ = await asyncio.wait(pending, timeout=window, return_when=asyncio.FIRST_COMPLETED)
+            if cancellation_waiter in done:
+                await terminate_process_group(process, reader)
+                raise JobCancelledError('Generation cancelled. Retry this stage.')
+            if waiter in done:
+                break
+            remaining = hard_deadline - loop.time()
+            cpu = await asyncio.to_thread(process_group_cpu_seconds, process.pid) if remaining > 0 else None
+            progressed = received[0] > checked_output or (
+                cpu is not None and cpu - checked_cpu >= MIN_PROGRESS_CPU_SECONDS
+            )
+            if remaining > 0 and progressed:
+                checked_output, checked_cpu = received[0], cpu if cpu is not None else checked_cpu
+                window = min(PROGRESS_WINDOW_SECONDS, remaining)
+                continue
             await terminate_process_group(process, reader)
-            raise JobCancelledError('Generation cancelled. Retry this stage.')
-        if waiter not in done:
-            await terminate_process_group(process, reader)
-            raise ProcessTimeoutError(f'Timed out while trying to {action}. Please retry.')
+            elapsed = round(loop.time() - started)
+            detail = (f'it was still working after {elapsed}s, the longest allowed' if remaining <= 0
+                      else f'it stopped making progress (no output or CPU use) after {elapsed}s')
+            raise ProcessTimeoutError(f'Timed out while trying to {action}: {detail}. Please retry.')
         result = ProcessResult(process.returncode, await reader)
         finish_tool_run(
             telemetry, 'succeeded' if result.returncode == 0 else 'failed',

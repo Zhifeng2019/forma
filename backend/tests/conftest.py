@@ -6,6 +6,8 @@ import shutil
 import sys
 import tempfile
 
+import pytest
+
 TEST_ROOT = Path(__file__).parents[2] / 'data' / 'test-runtimes'
 TEST_ROOT.mkdir(parents=True, exist_ok=True)
 TEST_DATA = Path(tempfile.mkdtemp(prefix='forma-test-', dir=TEST_ROOT))
@@ -19,6 +21,15 @@ os.environ['APPSPEC_V1'] = 'false'
 os.environ['ACCEPTANCE_GATE_V1'] = 'false'
 os.environ['SPECIALIST_WORKERS_V1'] = 'false'
 os.environ['SANDBOX_V1'] = 'false'
+
+
+@pytest.fixture(autouse=True)
+def forget_provider_capabilities():
+    # Learned provider capabilities are process-wide; each test starts from none.
+    from app import llm
+    llm._SCHEMA_UNSUPPORTED.clear()
+    yield
+    llm._SCHEMA_UNSUPPORTED.clear()
 
 
 def pytest_sessionfinish(session, exitstatus):

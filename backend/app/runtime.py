@@ -293,9 +293,12 @@ class RuntimeManager:
         telemetry: dict | None = None,
     ) -> None:
         try:
-            result = await run_process(command, cwd, env, timeout, action, **(telemetry or {}))
+            result = await run_process(
+                command, cwd, env, timeout, action, max_timeout=settings.runtime_build_max_timeout,
+                **(telemetry or {}),
+            )
         except TimeoutError as exc:
-            raise RuntimeLaunchError(f'Timed out while trying to {action}. Please retry.') from exc
+            raise RuntimeLaunchError(str(exc)) from exc
         if result.returncode:
             # Package indexes and local paths can contain private configuration;
             # keep raw installer output out of API responses and activity history.

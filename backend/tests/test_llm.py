@@ -122,6 +122,14 @@ async def test_json_schema_falls_back_for_compatible_providers(monkeypatch):
     assert FakeClient.calls[0]['json']['response_format']['type'] == 'json_schema'
     assert FakeClient.calls[1]['json']['response_format'] == {'type': 'json_object'}
 
+    FakeClient.responses = [FakeResponse('{"product":{"name":"again"}}')]
+    FakeClient.calls = []
+    result = await llm.complete_with_schema(
+        provider, 'Design a contract', 'Return the proposal', {'type': 'object'}, 'forma_appspec',
+    )
+    assert result == {'product': {'name': 'again'}}
+    assert [call['json']['response_format'] for call in FakeClient.calls] == [{'type': 'json_object'}]
+
 
 @pytest.mark.asyncio
 async def test_length_response_is_continued_and_reassembled(monkeypatch):
@@ -159,4 +167,61 @@ async def test_literal_newlines_inside_document_json_are_normalized(monkeypatch)
     result = await llm.complete(provider, 'Write a design', 'Return the document')
 
     assert result == {'document': '# Design\n\n## Users\nRegister and sign in.'}
+    assert len(FakeClient.calls) == 1
+
+
+def retry_provider():
+    return {
+        'name': 'Compatible provider', 'model': 'retry-model',
+        'base_url': 'https://api.example.com/v1',
+        'api_key_encrypted': encrypt_secret('not-a-real-key'),
+    }
+
+
+@pytest.mark.asyncio
+async def test_transient_provider_errors_are_retried_with_backoff(monkeypatch):
+    rate_limited = FakeResponse('slow down', status=429)
+    rate_limited.headers = {'retry-after': '7'}
+    FakeClient.responses = [rate_limited, FakeResponse('overloaded', status=503), FakeResponse('{"ok":true}')]
+    FakeClient.calls = []
+    pauses = []
+
+    async def pause(delay):
+        pauses.append(delay)
+
+    monkeypatch.setattr(httpx, 'AsyncClient', FakeClient)
+    monkeypatch.setattr(llm, '_pause_before_retry', pause)
+    assert await llm.complete(retry_provider(), 'System', 'Prompt') == {'ok': True}
+    assert len(FakeClient.calls) == 3
+    assert pauses == [7.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_dropped_connections_are_retried_then_reported(monkeypatch):
+    class DroppingClient(FakeClient):
+        async def post(self, url, **kwargs):
+            self.calls.append({'url': url, **kwargs})
+            raise httpx.ConnectError('connection reset')
+
+    DroppingClient.calls = []
+    pauses = []
+
+    async def pause(delay):
+        pauses.append(delay)
+
+    monkeypatch.setattr(httpx, 'AsyncClient', DroppingClient)
+    monkeypatch.setattr(llm, '_pause_before_retry', pause)
+    with pytest.raises(llm.GenerationError, match='Unable to reach Compatible provider'):
+        await llm.complete(retry_provider(), 'System', 'Prompt')
+    assert len(DroppingClient.calls) == 3
+    assert pauses == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_client_errors_are_not_retried(monkeypatch):
+    FakeClient.responses = [FakeResponse('bad key', status=401)]
+    FakeClient.calls = []
+    monkeypatch.setattr(httpx, 'AsyncClient', FakeClient)
+    with pytest.raises(llm.GenerationError, match='Provider returned 401'):
+        await llm.complete(retry_provider(), 'System', 'Prompt')
     assert len(FakeClient.calls) == 1

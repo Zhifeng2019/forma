@@ -138,9 +138,11 @@ async def _run(
     command: list[str], cwd: Path, env: dict[str, str], timeout: int, action: str, telemetry: dict | None = None,
 ) -> str:
     try:
-        result = await run_process(command, cwd, env, timeout, action, **(telemetry or {}))
+        result = await run_process(
+            command, cwd, env, timeout, action, max_timeout=settings.runtime_build_max_timeout, **(telemetry or {}),
+        )
     except TimeoutError as exc:
-        raise PackageBuildError(f'{action} timed out. Please retry.') from exc
+        raise PackageBuildError(str(exc)) from exc
     if result.returncode:
         raise PackageBuildError(f'{action} failed:\n{result.output[-3000:]}')
     return result.output

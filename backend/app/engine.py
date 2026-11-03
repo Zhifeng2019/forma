@@ -238,6 +238,10 @@ async def _advance(
             save_artifact(db, project_id, 'plan', 'plan.md', content, 0)
             next_stage, index = 'build', 3
             message = 'The implementation is split into three shareable phases. Approve the plan to start building.'
+        elif stage == 'review' and not revise:
+            # Approving the release accepts the reviewed version as-is; it must not regenerate it.
+            next_stage, index = 'deploy', 5
+            message = 'The release is approved. Publish it when you are ready.'
         elif stage in {'build', 'review'}:
             # Feedback refines the current phase; only explicit approval advances it.
             phase = max(1, project['phase_index']) if revise else min(3, project['phase_index'] + 1)
@@ -301,15 +305,14 @@ async def _advance(
                 save_artifact(db, project_id, 'build', path, content, version)
             for path, content in provenance.items():
                 save_artifact(db, project_id, 'build', path, content, version)
-            version_label = 'Refinement' if revise or stage == 'review' else f'Phase {phase}'
+            version_label = 'Refinement' if revise else f'Phase {phase}'
             db.execute('INSERT INTO versions(project_id,version,label,note,backend_mode,source_format) VALUES(?,?,?,?,?,?)',
                        (project_id, version, version_label, feedback or STAGE_LABELS[stage], backend_mode, source_format))
             next_stage = stage if revise else 'build' if phase < 3 else 'review'
             index = project['stage_index'] if revise else 3 if phase < 3 else 4
             db.execute('UPDATE projects SET phase_index=? WHERE id=?', (phase, project_id))
             message = ('Your feedback has been applied in a new version.' if revise else
-                       f'Phase {phase} is implemented and the preview has been updated.' if stage == 'build' else
-                       'Your feedback has been applied in a new version.')
+                       f'Phase {phase} is implemented and the preview has been updated.')
         elif stage == 'deploy':
             next_stage, index, message = 'deploy', 5, 'Your application is ready to publish.'
         else:

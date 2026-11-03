@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     runtime_pip_index_url: str = 'https://mirrors.aliyun.com/pypi/simple/'
     runtime_npm_registry: str = 'https://registry.npmmirror.com'
     runtime_build_timeout: int = 240
+    # Builds and installs still making progress may continue past their timeout up to this limit.
+    runtime_build_max_timeout: int = 900
     runtime_install_timeout: int = 240
     runtime_start_timeout: int = 25
     runtime_request_timeout: int = 20
