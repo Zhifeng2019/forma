@@ -15,6 +15,8 @@ from .app_origins import ApplicationOriginMiddleware
 from .runtime import inject_runtime_bootstrap, runtime_manager
 from .frontend_builder import PackageBuildError, ensure_frontend_build, frontend_asset_path
 from .studio_static import StudioStaticFiles
+from .hosting import hosting_expiry_loop
+from .policy import hosting_expired
 
 init_databases()
 
@@ -24,9 +26,11 @@ async def lifespan(_app):
     log_configuration()
     recover_all_workspaces(startup=True)
     recovery = asyncio.create_task(recovery_loop())
+    hosting = asyncio.create_task(hosting_expiry_loop())
     yield
     recovery.cancel()
-    await asyncio.gather(recovery, return_exceptions=True)
+    hosting.cancel()
+    await asyncio.gather(recovery, hosting, return_exceptions=True)
     await cancel_generation_jobs()
     await runtime_manager.stop_all()
 
@@ -67,6 +71,8 @@ def published_app(project_id: str):
     deployment = get_deployment(project_id)
     if not deployment:
         raise HTTPException(404, 'This application is not published')
+    if hosting_expired(deployment['hosting_expires_at']):
+        raise HTTPException(410, 'Hosting has expired. The owner can publish this application again.')
     try:
         artifacts = deployment_artifacts(deployment)
     except GenerationError as exc:

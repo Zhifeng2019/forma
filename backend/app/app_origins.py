@@ -77,8 +77,9 @@ class ApplicationOriginMiddleware:
                 headers['Origin-Agent-Cluster'] = '?1'
                 headers['X-Content-Type-Options'] = 'nosniff'
                 headers['Referrer-Policy'] = 'no-referrer'
-                if generated and preview:
+                if generated:
                     headers['Cache-Control'] = 'no-store'
+                if generated and preview:
                     headers['Content-Security-Policy'] = 'frame-ancestors ' + ' '.join(sorted(studio_origins()))
                 elif not generated:
                     headers['Cross-Origin-Opener-Policy'] = 'same-origin'

@@ -76,6 +76,16 @@ cd backend
 
 The initial local administrator is `admin@forma.local` with password `admin123`. Change this account before exposing the service publicly. All data is development-local by default under `data/`.
 
+## Studio policy
+
+Administrators can set these controls in **Admin → Studio policy**:
+
+- **Allow users to configure and choose models** defaults to on. Members can select a shared provider, use Forma Local, or connect private providers in Configuration. Private API keys are encrypted and accessible only to their owner through generation; they are never returned by the API. Turning this off forces normal users to use the **Global generation engine** selected in Admin. Their previous selections are preserved for when access is restored. Administrators retain their personal engine selection.
+- **Projects per user** defaults to **5** and accepts positive whole numbers. The limit applies to all accounts, including administrators, and concurrent creation requests cannot exceed it. Deleting a project frees a slot. Lowering the limit keeps existing projects and blocks new ones until the account is below the limit.
+- **Hosting period (hours)** defaults to **1**, with a maximum of **8,760 hours (365 days)**. Each publish or renewal starts a fresh period using the current policy. Existing deadlines remain unchanged when the policy changes. Public pages, assets, and APIs return HTTP 410 after expiry, and expired public backend processes stop within the next 30-second cleanup cycle. Preview and source access remain available to the owner. Use **Publish** or **Renew hosting** to bring the app online again.
+
+Policy settings are persisted in the control database and enforced by the backend. On upgrade, existing shared providers remain shared, and existing published apps receive one initial hosting period. Subsequent restarts preserve the deadline, including expired releases.
+
 ## Generated project packages
 
 New projects default to **Project package**; **Single file** remains available for legacy generation. A multi-file version is laid out as:

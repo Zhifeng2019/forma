@@ -4,11 +4,12 @@ import json
 
 from .database import control_db, workspace_db
 from .llm import GenerationError
+from .policy import hosting_deadline, studio_policy
 
 
 def get_deployment(project_id: str) -> dict | None:
     with control_db() as db:
-        row = db.execute('''SELECT project_id,user_id,published_version,backend_mode,source_format,runtime_metadata
+        row = db.execute('''SELECT project_id,user_id,published_version,backend_mode,source_format,runtime_metadata,hosting_expires_at
             FROM deployment_registry WHERE project_id=?''', (project_id,)).fetchone()
     if not row:
         return None
@@ -19,13 +20,20 @@ def get_deployment(project_id: str) -> dict | None:
         'backend_mode': row['backend_mode'],
         'source_format': row['source_format'],
         'runtime_metadata': json.loads(row['runtime_metadata'] or '{}'),
+        'hosting_expires_at': row['hosting_expires_at'],
     }
 
 
 def upsert_deployment(user_id: int, project_id: str) -> None:
     """Write the current published state, or remove it when no version is published."""
+    with control_db() as control:
+        hours = studio_policy(control)['hosting_duration_hours']
     with workspace_db(user_id) as workspace:
-        project = workspace.execute('''SELECT p.published_version,p.backend_mode current_mode,
+        # Give pre-policy releases one initial hosting window. Never renew on restart.
+        workspace.execute('''UPDATE projects SET hosting_expires_at=? WHERE id=?
+            AND published_version IS NOT NULL AND hosting_expires_at IS NULL''',
+            (hosting_deadline(hours), project_id))
+        project = workspace.execute('''SELECT p.published_version,p.hosting_expires_at,p.backend_mode current_mode,
             p.source_format current_format,v.backend_mode version_mode,v.source_format version_format
             FROM projects p LEFT JOIN versions v ON v.project_id=p.id AND v.version=p.published_version
             WHERE p.id=?''', (project_id,)).fetchone()
@@ -37,16 +45,17 @@ def upsert_deployment(user_id: int, project_id: str) -> None:
         backend_mode = project['version_mode'] or project['current_mode']
         source_format = project['version_format'] or project['current_format']
         control.execute('''INSERT INTO deployment_registry(
-            project_id,user_id,published_version,backend_mode,source_format,runtime_metadata)
-            VALUES(?,?,?,?,?,?)
+            project_id,user_id,published_version,backend_mode,source_format,runtime_metadata,hosting_expires_at)
+            VALUES(?,?,?,?,?,?,?)
             ON CONFLICT(project_id) DO UPDATE SET
                 user_id=excluded.user_id,
                 published_version=excluded.published_version,
                 backend_mode=excluded.backend_mode,
                 source_format=excluded.source_format,
                 runtime_metadata=excluded.runtime_metadata,
+                hosting_expires_at=excluded.hosting_expires_at,
                 updated_at=CURRENT_TIMESTAMP''',
-            (project_id, user_id, published_version, backend_mode, source_format, '{}'))
+            (project_id, user_id, published_version, backend_mode, source_format, '{}', project['hosting_expires_at']))
 
 
 def delete_deployment(project_id: str) -> None:

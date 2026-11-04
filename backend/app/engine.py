@@ -58,10 +58,11 @@ def generation_source_files(db, project_id: str, version: int) -> dict[str, str]
 
 
 def provider_for_user(control, user_id):
-    pref = control.execute('SELECT provider_id FROM preferences WHERE user_id=?', (user_id,)).fetchone()
-    if not pref or not pref['provider_id']:
+    from .policy import effective_provider_id, selectable_provider
+    provider_id = effective_provider_id(control, user_id)
+    if not provider_id:
         return None
-    row = control.execute('SELECT * FROM providers WHERE id=? AND enabled=1', (pref['provider_id'],)).fetchone()
+    row = selectable_provider(control, provider_id, user_id)
     return dict(row) if row else None
 
 

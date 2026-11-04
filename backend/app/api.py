@@ -7,7 +7,8 @@ from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingRes
 import httpx
 from .database import control_db, workspace_db, rows
 from .deps import current_user, admin_user, owned_project
-from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput, VerificationInput, ArchitectureInput
+from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput, VerificationInput, ArchitectureInput, StudioPolicyInput
+from .policy import can_configure_llm, effective_provider_id, hosting_deadline, hosting_expired, selectable_provider, studio_policy
 from .verification.runner import verify_package
 from .verification.review import latest_model_review
 from .security import hash_password, verify_password, create_token, encrypt_secret, decrypt_secret
@@ -35,6 +36,7 @@ from .spec.capabilities import assess_capabilities
 from .spec.review import appspec_review
 from .spec.schema import parse_appspec
 from .deployment_registry import delete_deployment, upsert_deployment
+from .hosting import publication_lock
 
 router = APIRouter(prefix='/api')
 _generation_jobs: dict[asyncio.Task, tuple[int, str]] = {}
@@ -182,39 +184,88 @@ def update_user(user_id: int, body: dict, admin=Depends(admin_user)):
 @router.get('/providers')
 def providers(user=Depends(current_user)):
     with control_db() as db:
+        policy = studio_policy(db)
         if user['role'] == 'admin':
-            items = db.execute('SELECT id,name,base_url,model,enabled,input_price_per_million,output_price_per_million,currency,created_at,api_key_encrypted FROM providers ORDER BY id')
+            items = db.execute('SELECT * FROM providers WHERE owner_user_id IS NULL OR owner_user_id=? ORDER BY id', (user['id'],))
+        elif not policy['allow_user_llm_config']:
+            items = db.execute('SELECT * FROM providers WHERE id=? AND owner_user_id IS NULL AND enabled=1', (policy['global_provider_id'],))
         else:
-            items = db.execute('SELECT id,name,base_url,model,enabled,input_price_per_million,output_price_per_million,currency,created_at,api_key_encrypted FROM providers WHERE enabled=1 ORDER BY id')
+            items = db.execute('SELECT * FROM providers WHERE (owner_user_id IS NULL AND enabled=1) OR owner_user_id=? ORDER BY id', (user['id'],))
         result = []
         for item in items:
             row = dict(item)
             row['has_key'] = bool(row.pop('api_key_encrypted'))
+            row['can_manage'] = can_configure_llm(user, policy) and (
+                row['owner_user_id'] == user['id'] or (user['role'] == 'admin' and row['owner_user_id'] is None))
             result.append(row)
     return result
 
 
-@router.post('/providers')
-def create_provider(body: ProviderInput, _admin=Depends(admin_user)):
-    if not body.base_url.startswith(('https://', 'http://localhost', 'http://127.0.0.1')):
-        raise HTTPException(400, 'Provider URL must use HTTPS')
+@router.get('/policy')
+def get_policy(_user=Depends(current_user)):
     with control_db() as db:
+        return studio_policy(db)
+
+
+@router.put('/admin/policy')
+def update_policy(body: StudioPolicyInput, _admin=Depends(admin_user)):
+    with control_db() as db:
+        db.execute('BEGIN IMMEDIATE')
+        if body.global_provider_id is not None and not db.execute(
+            'SELECT 1 FROM providers WHERE id=? AND enabled=1 AND owner_user_id IS NULL',
+            (body.global_provider_id,),
+        ).fetchone():
+            raise HTTPException(400, 'Choose an enabled shared provider for the global model')
+        db.execute('''UPDATE studio_policy SET allow_user_llm_config=?,global_provider_id=?,
+            max_projects_per_user=?,hosting_duration_hours=? WHERE id=1''', (
+                int(body.allow_user_llm_config), body.global_provider_id,
+                body.max_projects_per_user, body.hosting_duration_hours,
+            ))
+    return body.model_dump()
+
+
+def require_provider_management(db, user, provider_id: int | None = None):
+    if not can_configure_llm(user, studio_policy(db)):
+        raise HTTPException(403, 'Model configuration is managed by your administrator')
+    if provider_id is None:
+        return None
+    provider = db.execute('SELECT * FROM providers WHERE id=?', (provider_id,)).fetchone()
+    if not provider or not (provider['owner_user_id'] == user['id'] or
+                            (provider['owner_user_id'] is None and user['role'] == 'admin')):
+        raise HTTPException(404, 'Provider not found')
+    return provider
+
+
+def validate_provider_url(url: str):
+    if not url.startswith(('https://', 'http://localhost', 'http://127.0.0.1')):
+        raise HTTPException(400, 'Provider URL must use HTTPS')
+
+
+@router.post('/providers')
+def create_provider(body: ProviderInput, user=Depends(current_user)):
+    with control_db() as db:
+        db.execute('BEGIN IMMEDIATE')
+        require_provider_management(db, user)
+        validate_provider_url(body.base_url)
         cursor = db.execute('''INSERT INTO providers(
-            name,base_url,model,api_key_encrypted,enabled,input_price_per_million,output_price_per_million,currency)
-            VALUES(?,?,?,?,?,?,?,?)''', (
+            name,base_url,model,api_key_encrypted,enabled,input_price_per_million,output_price_per_million,currency,owner_user_id)
+            VALUES(?,?,?,?,?,?,?,?,?)''', (
             body.name, body.base_url.rstrip('/'), body.model, encrypt_secret(body.api_key), int(body.enabled),
             body.input_price_per_million, body.output_price_per_million, body.currency.upper(),
+            None if user['role'] == 'admin' else user['id'],
         ))
         provider_id = cursor.lastrowid
     return {'id': provider_id, 'name': body.name}
 
 
 @router.put('/providers/{provider_id}')
-def update_provider(provider_id: int, body: ProviderInput, _admin=Depends(admin_user)):
+def update_provider(provider_id: int, body: ProviderInput, user=Depends(current_user)):
     with control_db() as db:
-        old = db.execute('SELECT api_key_encrypted FROM providers WHERE id=?', (provider_id,)).fetchone()
-        if not old:
-            raise HTTPException(404, 'Provider not found')
+        db.execute('BEGIN IMMEDIATE')
+        old = require_provider_management(db, user, provider_id)
+        validate_provider_url(body.base_url)
+        if not body.enabled and studio_policy(db)['global_provider_id'] == provider_id:
+            raise HTTPException(409, 'Choose another global model before disabling this provider')
         key = encrypt_secret(body.api_key) if body.api_key else old['api_key_encrypted']
         db.execute('''UPDATE providers SET name=?,base_url=?,model=?,api_key_encrypted=?,enabled=?,
             input_price_per_million=?,output_price_per_million=?,currency=? WHERE id=?''', (
@@ -225,19 +276,21 @@ def update_provider(provider_id: int, body: ProviderInput, _admin=Depends(admin_
 
 
 @router.delete('/providers/{provider_id}')
-def delete_provider(provider_id: int, _admin=Depends(admin_user)):
+def delete_provider(provider_id: int, user=Depends(current_user)):
     with control_db() as db:
+        db.execute('BEGIN IMMEDIATE')
+        require_provider_management(db, user, provider_id)
+        if studio_policy(db)['global_provider_id'] == provider_id:
+            raise HTTPException(409, 'Choose another global model before removing this provider')
         db.execute('UPDATE preferences SET provider_id=NULL WHERE provider_id=?', (provider_id,))
         db.execute('DELETE FROM providers WHERE id=?', (provider_id,))
     return {'ok': True}
 
 
 @router.post('/providers/{provider_id}/test')
-async def test_provider(provider_id: int, _admin=Depends(admin_user)):
+async def test_provider(provider_id: int, user=Depends(current_user)):
     with control_db() as db:
-        provider = db.execute('SELECT * FROM providers WHERE id=?', (provider_id,)).fetchone()
-    if not provider:
-        raise HTTPException(404, 'Provider not found')
+        provider = require_provider_management(db, user, provider_id)
     try:
         async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
             response = await client.get(provider['base_url'].rstrip('/') + '/models',
@@ -253,18 +306,27 @@ async def test_provider(provider_id: int, _admin=Depends(admin_user)):
 def get_preferences(user=Depends(current_user)):
     with control_db() as db:
         pref = db.execute('SELECT * FROM preferences WHERE user_id=?', (user['id'],)).fetchone()
-    return dict(pref) if pref else {'provider_id': None, 'auto_mode': False, 'theme': 'light'}
+        result = dict(pref) if pref else {'auto_mode': False, 'theme': 'light'}
+        result['provider_id'] = effective_provider_id(db, user['id'])
+        result['can_configure_llm'] = can_configure_llm(user, studio_policy(db))
+    return result
 
 
 @router.put('/preferences')
 def update_preferences(body: PreferenceInput, user=Depends(current_user)):
     with control_db() as db:
-        if body.provider_id and not db.execute('SELECT 1 FROM providers WHERE id=? AND enabled=1', (body.provider_id,)).fetchone():
+        db.execute('BEGIN IMMEDIATE')
+        configurable = can_configure_llm(user, studio_policy(db))
+        if not configurable and 'provider_id' in body.model_fields_set:
+            raise HTTPException(403, 'Model selection is managed by your administrator')
+        if configurable and body.provider_id is not None and not selectable_provider(db, body.provider_id, user['id']):
             raise HTTPException(400, 'Selected provider is unavailable')
+        old = db.execute('SELECT provider_id FROM preferences WHERE user_id=?', (user['id'],)).fetchone()
+        provider_id = body.provider_id if configurable and 'provider_id' in body.model_fields_set else (old['provider_id'] if old else None)
         db.execute('''INSERT INTO preferences(user_id,provider_id,auto_mode,theme) VALUES(?,?,?,?)
                       ON CONFLICT(user_id) DO UPDATE SET provider_id=excluded.provider_id,auto_mode=excluded.auto_mode,theme=excluded.theme,updated_at=CURRENT_TIMESTAMP''',
-                   (user['id'], body.provider_id, int(body.auto_mode), body.theme))
-    return body.model_dump()
+                   (user['id'], provider_id, int(body.auto_mode), body.theme))
+    return get_preferences(user)
 
 
 def verification_payload(user_id: int, project_id: str, version: int) -> dict:
@@ -290,6 +352,9 @@ def project_payload(user_id, project_id):
         if not project:
             raise HTTPException(404, 'Project not found')
         result = dict(project)
+        result['hosting_expired'] = hosting_expired(result['hosting_expires_at'])
+        with control_db() as control:
+            result['hosting_duration_hours'] = studio_policy(control)['hosting_duration_hours']
         result['auto_mode'] = bool(result['auto_mode'])
         result['backend_enabled'] = result['backend_mode'] == 'fastapi'
         result['messages'] = rows(db.execute('SELECT * FROM messages WHERE project_id=? ORDER BY id', (project_id,)))
@@ -312,7 +377,7 @@ def project_payload(user_id, project_id):
         result['verification_available'] = has_acceptance_contract(db, project_id, result['current_version'])
         result.update(verification_payload(user_id, project_id, result['current_version']))
         result['active_job'] = active_job(db, project_id)
-        result['published_url'] = published_url(project_id) if result['published_version'] else None
+        result['published_url'] = published_url(project_id) if result['published_version'] and not result['hosting_expired'] else None
         return result
 
 
@@ -330,7 +395,8 @@ def has_acceptance_contract(db, project_id: str, version: int) -> bool:
 @router.get('/projects')
 def list_projects(user=Depends(current_user)):
     with workspace_db(user['id']) as db:
-        return rows(db.execute('SELECT * FROM projects ORDER BY updated_at DESC'))
+        return [{**dict(row), 'hosting_expired': hosting_expired(row['hosting_expires_at'])}
+                for row in db.execute('SELECT * FROM projects ORDER BY updated_at DESC')]
 
 
 @router.post('/projects')
@@ -338,7 +404,13 @@ async def create_project(body: ProjectInput, user=Depends(current_user)):
     project_id = uuid.uuid4().hex
     reason = 'Selected when this project was created.' if body.backend_mode != 'auto' else ''
     initial_status = 'working' if body.defer else 'ready'
+    with control_db() as control:
+        limit = studio_policy(control)['max_projects_per_user']
     with workspace_db(user['id']) as db:
+        # Reserve the slot atomically, including concurrent requests from other workers.
+        db.execute('BEGIN IMMEDIATE')
+        if db.execute('SELECT COUNT(*) FROM projects').fetchone()[0] >= limit:
+            raise HTTPException(409, f'Project limit reached ({limit} per user). Delete a project before creating another.')
         db.execute('INSERT INTO projects(id,name,brief,auto_mode,backend_mode,backend_reason,source_format,status) VALUES(?,?,?,?,?,?,?,?)',
                    (project_id, body.name.strip(), body.brief.strip(), int(body.auto_mode), body.backend_mode, reason, body.source_format, initial_status))
         add_message(db, project_id, 'user', body.brief.strip(), 'brief')
@@ -768,26 +840,30 @@ async def publish_project(project_id: str, body: PublishInput, user=Depends(curr
             raise HTTPException(409, f'Verification failed: {", ".join(failures) or "required checks"}')
     if version_backend_mode(user['id'], project_id, version) == 'fastapi':
         runtime_artifacts(user['id'], project_id, version)
-    with workspace_db(user['id']) as db:
-        artifact_path = 'frontend/index.html' if version_source_format(user['id'], project_id, version) == 'multi-file' else 'index.html'
-        if not db.execute('SELECT 1 FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, artifact_path, version)).fetchone():
-            raise HTTPException(404, 'Version not found')
-        db.execute('UPDATE projects SET published_version=?,stage=?,stage_index=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', (version, 'deploy', 5, project_id))
-        add_event(db, project_id, f'Version {version} published', 'success')
-        add_message(db, project_id, 'agent', f'Version {version} is live. Your public link is ready to share.', 'deployment')
-    await runtime_manager.stop_project(project_id, channel='public', keep_version=version)
-    upsert_deployment(user['id'], project_id)
+    async with publication_lock(project_id):
+        with control_db() as control:
+            expires_at = hosting_deadline(studio_policy(control)['hosting_duration_hours'])
+        with workspace_db(user['id']) as db:
+            artifact_path = 'frontend/index.html' if version_source_format(user['id'], project_id, version) == 'multi-file' else 'index.html'
+            if not db.execute('SELECT 1 FROM artifacts WHERE project_id=? AND path=? AND version=?', (project_id, artifact_path, version)).fetchone():
+                raise HTTPException(404, 'Version not found')
+            db.execute('UPDATE projects SET published_version=?,hosting_expires_at=?,stage=?,stage_index=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', (version, expires_at, 'deploy', 5, project_id))
+            add_event(db, project_id, f'Version {version} published; hosting expires at {expires_at}', 'success')
+            add_message(db, project_id, 'agent', f'Version {version} is live. Your public link is ready to share. Hosting expires at {expires_at}.', 'deployment')
+        await runtime_manager.stop_project(project_id, channel='public', keep_version=version)
+        upsert_deployment(user['id'], project_id)
     return project_payload(user['id'], project_id)
 
 
 @router.post('/projects/{project_id}/unpublish')
 async def unpublish_project(project_id: str, user=Depends(current_user)):
     owned_project(user['id'], project_id)
-    with workspace_db(user['id']) as db:
-        db.execute('UPDATE projects SET published_version=NULL WHERE id=?', (project_id,))
-        add_event(db, project_id, 'Publication revoked')
-    await runtime_manager.stop_project(project_id, channel='public')
-    delete_deployment(project_id)
+    async with publication_lock(project_id):
+        with workspace_db(user['id']) as db:
+            db.execute('UPDATE projects SET published_version=NULL,hosting_expires_at=NULL WHERE id=?', (project_id,))
+            add_event(db, project_id, 'Publication revoked')
+        await runtime_manager.stop_project(project_id, channel='public')
+        delete_deployment(project_id)
     return {'ok': True}
 
 

@@ -2,6 +2,14 @@ export type User = { id: number; email: string; name: string; role: 'admin' | 'u
 export type Provider = {
   id: number; name: string; base_url: string; model: string; enabled: number; has_key: boolean; created_at: string
   input_price_per_million: number | null; output_price_per_million: number | null; currency: string
+  owner_user_id?: number | null; can_manage?: boolean
+}
+export type StudioPolicy = {
+  allow_user_llm_config: boolean; global_provider_id: number | null
+  max_projects_per_user: number; hosting_duration_hours: number
+}
+export type Preferences = {
+  provider_id: number | null; can_configure_llm: boolean; auto_mode: boolean; theme: string
 }
 export type Message = { id: number; role: 'user' | 'agent'; content: string; kind: string; metadata: string; created_at: string }
 export type Artifact = { id: number; path: string; stage: string; content: string; version: number; created_at: string }
@@ -67,10 +75,11 @@ export type ActiveJob = {
   trace_id: string; created_at: string; updated_at: string
 }
 export type Project = {
+  hosting_expires_at?: string | null; hosting_expired?: boolean; hosting_duration_hours?: number
   id: string; name: string; brief: string; description: string; stage: string; stage_index: number
   phase_index: number; status: 'ready' | 'working' | 'error'; auto_mode: boolean; current_version: number
   backend_mode: BackendMode; backend_reason: string; backend_enabled: boolean; source_format: SourceFormat
-  published_version: number | null; published_url?: string; created_at: string; updated_at: string
+  published_version: number | null; published_url?: string | null; created_at: string; updated_at: string
   messages: Message[]; artifacts: Artifact[]; versions: Version[]; events: StudioEvent[]; active_job?: ActiveJob | null
   appspec?: AppSpecEnvelope | null
   appspec_valid?: boolean | null; appspec_error?: string | null

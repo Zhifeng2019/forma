@@ -2,11 +2,11 @@ import { FormEvent, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, ArrowUpRight, Check, Clock3, Code2, FileText, Globe2, Lightbulb, MoreHorizontal, Plus, Search, Server, Sparkles, Trash2 } from 'lucide-react'
 import { api } from '../api'
-import type { BackendMode, Project, User } from '../types'
+import type { BackendMode, Project, StudioPolicy, User } from '../types'
 import { Layout } from '../components/Layout'
 import { Modal } from '../components/Modal'
 
-type ProjectSummary = Pick<Project, 'id' | 'name' | 'brief' | 'stage' | 'stage_index' | 'status' | 'updated_at' | 'published_version' | 'current_version' | 'backend_mode'>
+type ProjectSummary = Pick<Project, 'id' | 'name' | 'brief' | 'stage' | 'stage_index' | 'status' | 'updated_at' | 'published_version' | 'current_version' | 'backend_mode' | 'hosting_expires_at' | 'hosting_expired'>
 const examples = [
   { icon: '📊', title: 'Client portal', text: 'A polished client portal for a boutique consultancy with project progress, files, invoices, and a calm weekly overview.' },
   { icon: '🌿', title: 'Habit tracker', text: 'A gentle habit tracker for busy people with streaks, weekly momentum, and encouraging progress insights.' },
@@ -26,11 +26,13 @@ export function Dashboard({ user, onUser }: { user: User; onUser: (user: User | 
   const [sourceFormat, setSourceFormat] = useState<Project['source_format']>('multi-file')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [projectLimit, setProjectLimit] = useState<number | null>(null)
   const navigate = useNavigate()
   const load = () => api<ProjectSummary[]>('/projects').then(setProjects).finally(() => setLoading(false))
   useEffect(() => {
-    void load()
-    void api<{ auto_mode: boolean }>('/preferences').then(pref => setAuto(pref.auto_mode))
+    void load().catch(reason => setError(reason.message))
+    void api<StudioPolicy>('/policy').then(policy => setProjectLimit(policy.max_projects_per_user)).catch(reason => setError(reason.message))
+    void api<{ auto_mode: boolean }>('/preferences').then(pref => setAuto(Boolean(pref.auto_mode))).catch(reason => setError(reason.message))
   }, [])
   const createProject = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError('')
@@ -40,15 +42,18 @@ export function Dashboard({ user, onUser }: { user: User; onUser: (user: User | 
   const choose = (example: typeof examples[0]) => { setName(example.title); setBrief(example.text); setCreate(true) }
   const remove = async (id: string) => { if (!confirm('Delete this project and all of its versions?')) return; await api(`/projects/${id}`, { method: 'DELETE' }); setProjects(p => p.filter(x => x.id !== id)) }
   const filtered = projects.filter(p => `${p.name} ${p.brief}`.toLowerCase().includes(query.toLowerCase()))
+  const atLimit = projectLimit !== null && projects.length >= projectLimit
   return <Layout user={user} onUser={onUser}>
-    <section className="dashboard-heading"><div><span className="eyebrow">YOUR CREATIVE SPACE</span><h1>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user.name.split(' ')[0]}.</h1><p>What would you like to bring to life today?</p></div><button className="button primary" onClick={() => setCreate(true)}><Plus size={17} />New application</button></section>
-    <section className="quick-start"><div className="quick-label"><Sparkles size={15} /><span>START WITH A SPARK</span></div><div className="spark-list">{examples.map(e => <button key={e.title} onClick={() => choose(e)}><span>{e.icon}</span>{e.title}<ArrowUpRight size={14} /></button>)}</div></section>
-    <section className="projects-section"><div className="section-title"><div><h2>Your projects</h2><span>{projects.length} {projects.length === 1 ? 'application' : 'applications'}</span></div><label className="search-field"><Search size={16} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search projects…" /></label></div>
+    <section className="dashboard-heading"><div><span className="eyebrow">YOUR CREATIVE SPACE</span><h1>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user.name.split(' ')[0]}.</h1><p>What would you like to bring to life today?</p></div><button className="button primary" disabled={loading || atLimit} onClick={() => setCreate(true)}><Plus size={17} />New application</button></section>
+    {atLimit && <p className="quota-notice" role="status">Project limit reached ({projectLimit}). Delete a project before creating another.</p>}
+    {error && !create && <div className="form-error" role="alert">{error}</div>}
+    <section className="quick-start"><div className="quick-label"><Sparkles size={15} /><span>START WITH A SPARK</span></div><div className="spark-list">{examples.map(e => <button key={e.title} disabled={loading || atLimit} onClick={() => choose(e)}><span>{e.icon}</span>{e.title}<ArrowUpRight size={14} /></button>)}</div></section>
+    <section className="projects-section"><div className="section-title"><div><h2>Your projects</h2><span>{projects.length}{projectLimit !== null ? ` / ${projectLimit}` : ''} {projects.length === 1 ? 'application' : 'applications'}</span></div><label className="search-field"><Search size={16} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search projects…" /></label></div>
       {loading ? <div className="project-grid">{[1, 2, 3].map(i => <div className="project-card skeleton" key={i} />)}</div> : filtered.length ? <div className="project-grid">{filtered.map((project, i) => <article className="project-card" key={project.id} onClick={() => navigate(`/projects/${project.id}`)}>
-        <div className={`project-visual tone-${i % 4}`}><div className="mini-browser"><span /><span /><span /><div className="mini-content"><i /><b /><b /><div><i /><i /><i /></div></div></div><span className={`status-chip ${project.published_version ? 'live' : ''}`}>{project.published_version ? <><Globe2 size={11} />Live</> : stageNames[project.stage_index]}</span></div>
+        <div className={`project-visual tone-${i % 4}`}><div className="mini-browser"><span /><span /><span /><div className="mini-content"><i /><b /><b /><div><i /><i /><i /></div></div></div><span className={`status-chip ${project.published_version && !project.hosting_expired ? 'live' : ''}`}>{project.hosting_expired ? <><Clock3 size={11} />Hosting expired</> : project.published_version ? <><Globe2 size={11} />Live</> : project.stage === 'deploy' ? 'Ready to publish' : stageNames[project.stage_index]}</span></div>
         <div className="project-info"><div><h3>{project.name}</h3><p>{project.brief}</p></div><button className="icon-button subtle" onClick={e => { e.stopPropagation(); void remove(project.id) }} aria-label={`Delete ${project.name}`}><Trash2 size={15} /></button></div>
         <footer><span><Clock3 size={13} />{formatDate(project.updated_at)}</span>{project.backend_mode === 'fastapi' && <span className="backend-summary"><Server size={12} />FastAPI</span>}<span>{project.current_version ? `v${project.current_version}` : 'Draft'}<ArrowRight size={14} /></span></footer>
-      </article>)}</div> : <div className="empty-state"><span><FileText size={28} /></span><h3>{query ? 'No matching projects' : 'Your next idea starts here'}</h3><p>{query ? 'Try another search term.' : 'Describe what you want to make. Forma will help with the rest.'}</p>{!query && <button className="button secondary" onClick={() => setCreate(true)}><Plus size={16} />Create your first app</button>}</div>}
+      </article>)}</div> : <div className="empty-state"><span><FileText size={28} /></span><h3>{query ? 'No matching projects' : 'Your next idea starts here'}</h3><p>{query ? 'Try another search term.' : 'Describe what you want to make. Forma will help with the rest.'}</p>{!query && <button className="button secondary" disabled={loading || atLimit} onClick={() => setCreate(true)}><Plus size={16} />Create your first app</button>}</div>}
     </section>
     {create && <Modal title="What are we building?" eyebrow="A NEW POSSIBILITY" onClose={() => !busy && setCreate(false)} className="create-modal"><form onSubmit={createProject}>
       <p className="modal-intro">Start with the idea, not the specifications. Your AI product team will help shape the details.</p>
@@ -66,7 +71,7 @@ export function Dashboard({ user, onUser }: { user: User; onUser: (user: User | 
       </div></fieldset>
       <label className="toggle-row"><span><strong>Autopilot mode</strong><small>Move through stages without approval gates</small></span><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /><i /></label>
       {error && <div className="form-error">{error}</div>}
-      <footer className="modal-actions"><button type="button" className="button ghost" onClick={() => setCreate(false)} disabled={busy}>Cancel</button><button className="button primary" disabled={busy}>{busy ? <><span className="spinner" />Shaping your idea…</> : <>Start building<ArrowRight size={16} /></>}</button></footer>
+      <footer className="modal-actions"><button type="button" className="button ghost" onClick={() => setCreate(false)} disabled={busy}>Cancel</button><button className="button primary" disabled={busy || atLimit}>{busy ? <><span className="spinner" />Shaping your idea…</> : <>Start building<ArrowRight size={16} /></>}</button></footer>
     </form></Modal>}
   </Layout>
 }

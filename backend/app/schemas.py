@@ -30,6 +30,13 @@ class PreferenceInput(BaseModel):
     theme: Literal['light', 'dark'] = 'light'
 
 
+class StudioPolicyInput(BaseModel):
+    allow_user_llm_config: bool
+    global_provider_id: int | None = Field(default=None, gt=0)
+    max_projects_per_user: int = Field(default=5, ge=1, strict=True)
+    hosting_duration_hours: int = Field(default=1, ge=1, le=8760, strict=True)
+
+
 class ProjectInput(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     brief: str = Field(min_length=12, max_length=12000)

@@ -13,15 +13,25 @@ CREATE TABLE IF NOT EXISTS providers (
  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL,
  model TEXT NOT NULL, api_key_encrypted TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
  input_price_per_million REAL, output_price_per_million REAL, currency TEXT NOT NULL DEFAULT 'USD',
+ owner_user_id INTEGER,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS preferences (
  user_id INTEGER PRIMARY KEY, provider_id INTEGER, auto_mode INTEGER NOT NULL DEFAULT 0,
  theme TEXT NOT NULL DEFAULT 'light', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS studio_policy (
+ id INTEGER PRIMARY KEY CHECK(id=1),
+ allow_user_llm_config INTEGER NOT NULL DEFAULT 1,
+ global_provider_id INTEGER,
+ max_projects_per_user INTEGER NOT NULL DEFAULT 5 CHECK(max_projects_per_user >= 1),
+ hosting_duration_hours INTEGER NOT NULL DEFAULT 1 CHECK(hosting_duration_hours BETWEEN 1 AND 8760)
+);
+INSERT OR IGNORE INTO studio_policy(id) VALUES(1);
 CREATE TABLE IF NOT EXISTS deployment_registry (
  project_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, published_version INTEGER NOT NULL,
  backend_mode TEXT NOT NULL, source_format TEXT NOT NULL, runtime_metadata TEXT NOT NULL DEFAULT '{}',
+ hosting_expires_at TEXT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_deployment_registry_user ON deployment_registry(user_id);
@@ -34,7 +44,7 @@ CREATE TABLE IF NOT EXISTS projects (
  phase_index INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'ready',
  auto_mode INTEGER NOT NULL DEFAULT 0, backend_mode TEXT NOT NULL DEFAULT 'auto',
  backend_reason TEXT NOT NULL DEFAULT '', source_format TEXT NOT NULL DEFAULT 'single-file',
- published_version INTEGER,
+ published_version INTEGER, hosting_expires_at TEXT,
  current_version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -150,9 +160,13 @@ def init_databases():
             'input_price_per_million': 'REAL',
             'output_price_per_million': 'REAL',
             'currency': "TEXT NOT NULL DEFAULT 'USD'",
+            'owner_user_id': 'INTEGER',
         }.items():
             if name not in provider_columns:
                 db.execute(f'ALTER TABLE providers ADD COLUMN {name} {definition}')
+        deployment_columns = {row['name'] for row in db.execute('PRAGMA table_info(deployment_registry)')}
+        if 'hosting_expires_at' not in deployment_columns:
+            db.execute('ALTER TABLE deployment_registry ADD COLUMN hosting_expires_at TEXT')
     from .security import hash_password
     with control_db() as db:
         if not db.execute('SELECT 1 FROM users LIMIT 1').fetchone():
@@ -179,6 +193,8 @@ def workspace_for(user_id: int):
     with workspace_db(user_id) as db:
         db.executescript(WORKSPACE_SCHEMA)
         columns = {row['name'] for row in db.execute('PRAGMA table_info(projects)')}
+        if 'hosting_expires_at' not in columns:
+            db.execute('ALTER TABLE projects ADD COLUMN hosting_expires_at TEXT')
         if 'backend_mode' not in columns:
             # Existing applications remain frontend-only after an in-place upgrade.
             db.execute("ALTER TABLE projects ADD COLUMN backend_mode TEXT NOT NULL DEFAULT 'static'")
