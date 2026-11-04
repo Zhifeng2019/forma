@@ -6,6 +6,8 @@ import path from 'node:path'
 const backendPort = Number(process.env.FORMA_TEST_BACKEND_PORT || 8000)
 const frontendPort = Number(process.env.FORMA_TEST_FRONTEND_PORT || 5173)
 const backendUrl = `http://127.0.0.1:${backendPort}`
+process.env.FORMA_TEST_BACKEND_URL = backendUrl
+process.env.FORMA_TEST_STUDIO_PREFIX = ''
 const production = process.env.FORMA_TEST_PRODUCTION === '1'
 const frontendUrl = production ? backendUrl : `http://127.0.0.1:${frontendPort}`
 const testDataDir = process.env.FORMA_TEST_DATA_DIR || mkdtempSync(path.join(tmpdir(), 'forma-browser-test-'))

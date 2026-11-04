@@ -18,7 +18,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
     const detail = data.detail
-    const message = Array.isArray(detail) ? detail.map(item => item.msg).join('. ') : typeof detail === 'string' ? detail : 'Something went wrong. Please try again.'
+    const message = Array.isArray(detail) ? detail.map(item => item.msg).join('\n') : typeof detail === 'string' ? detail : 'Something went wrong. Please try again.'
     throw new Error(message)
   }
   return data

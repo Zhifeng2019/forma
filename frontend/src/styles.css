@@ -135,3 +135,34 @@
 
 /* Account deletion */
 .delete-user-dialog{width:calc(100% - 40px);border:1px solid var(--line);color:var(--ink)}.delete-user-dialog::backdrop{background:#1d231b80;backdrop-filter:blur(5px)}.delete-user-dialog p{font-size:13px;line-height:1.6;color:var(--muted);margin:0 0 18px}.button.danger{background:#ad3527;border-color:#ad3527;color:white}.delete-user-button{color:#ad3527}.user-management .member-actions{flex-wrap:wrap}.user-status.deleting{color:#ad3527}
+
+/* Interface language controls and Simplified Chinese typography. */
+.language-switcher{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;color:var(--muted);font-size:12px;white-space:nowrap}
+.language-switcher select{font:inherit;color:var(--ink);background:var(--white);border:1px solid var(--line);border-radius:7px;padding:6px 8px;cursor:pointer;max-width:115px}
+.language-switcher select:focus-visible{outline:3px solid #e8653830;outline-offset:2px}
+.site-header{gap:clamp(12px,3vw,40px)}
+.site-header>.language-switcher{margin-left:auto}
+.site-header>.account-wrap{margin-left:0}
+.auth-form-side{position:relative}
+.auth-language{position:absolute;right:28px;top:24px}
+.language-preference{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:20px}
+.language-preference h2{font-size:14px;margin:0 0 6px}
+.language-preference p{font-size:12px;color:var(--muted);margin:0;line-height:1.6}
+.form-error,.usage-error,.builder-error,.artifact-error{white-space:pre-line}
+html[lang="zh-CN"]{font-family:'DM Sans','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif}
+html[lang="zh-CN"] h1,html[lang="zh-CN"] h2,html[lang="zh-CN"] h3,html[lang="zh-CN"] p,html[lang="zh-CN"] .eyebrow,html[lang="zh-CN"] .kicker{letter-spacing:normal}
+html[lang="zh-CN"] .story-copy h1{line-height:1.35}
+html[lang="zh-CN"] .button{letter-spacing:normal}
+@media(max-width:760px){
+  .site-header{flex-wrap:wrap;height:auto;min-height:60px;gap:12px;padding-top:12px;padding-bottom:12px}
+  .site-header .main-nav{order:4;flex-basis:100%;justify-content:center}
+  .site-header>.language-switcher{margin-left:auto}
+  .site-header .brand em{display:none}
+  .builder-header{flex-wrap:wrap;height:auto;min-height:58px;gap:8px;padding-top:8px;padding-bottom:8px}
+  .builder-brand{min-width:0;max-width:100%}
+  .builder-header-actions{margin-left:auto;flex-wrap:wrap;gap:8px}
+  .builder-header-actions .button{font-size:10px}
+  .auth-form-side{padding-top:76px}
+  .auth-language{right:22px;top:22px}
+  .language-preference{align-items:flex-start}
+}

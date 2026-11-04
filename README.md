@@ -81,6 +81,16 @@ The initial local administrator is `admin@forma.local` with password `admin123`.
 
 See the [deployment guide for `www.riskcat.cn/forma`](docs/deployment-aliyun-ecs.md). It includes a systemd service, Nginx snippets that coexist with existing applications, wildcard HTTPS for generated apps, and backup/update instructions. Production subpath hosting uses `npm run build -- --base=/forma/` plus `STUDIO_PATH_PREFIX=/forma` in the single `backend/.env` file.
 
+## Interface languages
+
+Forma supports English and Simplified Chinese through [react-i18next](https://react.i18next.com/latest/using-with-hooks). Use the language selector on authentication pages, in the studio header, or in Configuration. On the first visit, a Chinese browser locale selects Simplified Chinese; other locales select English. An explicit choice is stored as `forma_language` in this browser and takes precedence on future visits, including after signing out. Switching language preserves open forms, entered values, and the current project.
+
+The translations cover registration and password recovery, navigation, projects, builder controls, settings, administration, publishing, validation, and known system messages. Dates, usage numbers, and costs follow the selected locale. Project names, user messages, generated documents, code, model responses, and raw diagnostic logs remain in their original language. The interface setting does not rewrite existing projects or change the AI's generation instructions. Verification emails already include English and Chinese; SMS wording follows the configured Aliyun templates.
+
+Translation catalogs are bundled locally in `frontend/src/locales/en.json` and `zh-CN.json`, so switching languages requires no translation service or additional environment file and also works beneath `/forma/`. UI messages use English source keys with `t(...)`; complete sentences use named interpolation parameters and count-based plural forms. Add corresponding entries to both files when adding text. Use `useTranslation()` in components so an open screen updates immediately; keep protocol values, CSS classes, and user content outside translation calls. Known backend messages are localized at the presentation boundary in `systemMessages.ts`, with unknown diagnostics preserved for troubleshooting.
+
+Run `npm test` for catalog, interpolation, formatting, and component checks. Browser coverage is in `frontend/e2e/i18n.spec.ts`; it uses the isolated verification mailbox described below. The `/forma` browser configuration also includes these language flows.
+
 ## Verified registration and administrator approval
 
 New users register with either an email address or a mainland China mobile number. Mobile numbers accept the local 11-digit format, `+86`, or `0086` and are stored as `+86` numbers. Hong Kong, Macau, Taiwan, and other international numbers are not supported. Both registration methods use a six-digit code; a password is required for subsequent sign-in.

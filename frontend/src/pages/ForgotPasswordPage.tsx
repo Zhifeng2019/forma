@@ -1,3 +1,5 @@
+import { systemText } from '../systemMessages'
+import { useTranslation } from '../i18n'
 import { type FormEvent, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, CheckCircle2, Eye, EyeOff, Mail, Smartphone } from 'lucide-react'
@@ -20,6 +22,7 @@ function savedChallenge(): SavedChallenge | null {
 }
 
 export function ForgotPasswordPage() {
+  const { t } = useTranslation()
   const [options, setOptions] = useState<Options | null>(null)
   const [method, setMethod] = useState<'email' | 'sms'>('email')
   const [identity, setIdentity] = useState('')
@@ -78,26 +81,26 @@ export function ForgotPasswordPage() {
   const expired = Boolean(challenge && now >= challenge.expires_at * 1000)
   const available = Boolean(options && (method === 'email' ? options.email_available : options.sms_available))
   return <AuthLayout>
-    <div className="auth-heading"><span>ACCOUNT RECOVERY</span><h2>{complete ? 'Password updated' : challenge ? 'Set a new password' : 'Forgot your password?'}</h2><p>{complete ? 'Your new password is ready. Previous sessions have been signed out.' : challenge ? `Reset request for ${challenge.destination}. ${deliveryNotice}` : 'Enter the email address or mainland China mobile number registered to your account.'}</p></div>
-    {complete ? <div className="registration-success" role="status"><CheckCircle2 size={30} /><p>Sign in with your new password. Accounts awaiting approval or disabled by an administrator still need administrator approval or reactivation.</p><Link to="/login" className="button primary">Back to sign in<ArrowRight size={16} /></Link></div> : <form className="auth-form" onSubmit={submit}>
+    <div className="auth-heading"><span>{t("ACCOUNT RECOVERY")}</span><h2>{complete ? t("Password updated") : challenge ? t("Set a new password") : t("Forgot your password?")}</h2><p>{complete ? t("Your new password is ready. Previous sessions have been signed out.") : challenge ? t("Reset request for {{destination}}. {{notice}}", { destination: challenge.destination, notice: t(deliveryNotice) }) : t("Enter the email address or mainland China mobile number registered to your account.")}</p></div>
+    {complete ? <div className="registration-success" role="status"><CheckCircle2 size={30} /><p>{t("Sign in with your new password. Accounts awaiting approval or disabled by an administrator still need administrator approval or reactivation.")}</p><Link to="/login" className="button primary">{t("Back to sign in")}<ArrowRight size={16} /></Link></div> : <form className="auth-form" onSubmit={submit}>
       {!challenge ? <>
-        <div className="registration-method" role="group" aria-label="Password reset method">
-          <button type="button" className={method === 'email' ? 'active' : ''} aria-pressed={method === 'email'} disabled={busy || !options?.email_available} onClick={() => { setMethod('email'); setIdentity(''); setError('') }}><Mail size={16} />Email</button>
-          <button type="button" className={method === 'sms' ? 'active' : ''} aria-pressed={method === 'sms'} disabled={busy || !options?.sms_available} onClick={() => { setMethod('sms'); setIdentity(''); setError('') }}><Smartphone size={16} />Mobile (+86)</button>
+        <div className="registration-method" role="group" aria-label={t("Password reset method")}>
+          <button type="button" className={method === 'email' ? 'active' : ''} aria-pressed={method === 'email'} disabled={busy || !options?.email_available} onClick={() => { setMethod('email'); setIdentity(''); setError('') }}><Mail size={16} />{t("Email")}</button>
+          <button type="button" className={method === 'sms' ? 'active' : ''} aria-pressed={method === 'sms'} disabled={busy || !options?.sms_available} onClick={() => { setMethod('sms'); setIdentity(''); setError('') }}><Smartphone size={16} />{t("Mobile (+86)")}</button>
         </div>
-        <label>{method === 'email' ? 'Email address' : 'Mainland China mobile number'}<input type={method === 'email' ? 'email' : 'tel'} value={identity} onChange={event => setIdentity(event.target.value)} placeholder={method === 'email' ? 'you@company.com' : '+86 138 0013 8000'} autoComplete={method === 'email' ? 'email' : 'tel'} maxLength={method === 'email' ? 320 : 32} required autoFocus disabled={busy} /></label>
-        {options && !available && <div className="form-error" role="alert">Password reset is currently unavailable. Please contact the administrator.</div>}
+        <label>{method === 'email' ? t("Email address") : t("Mainland China mobile number")}<input type={method === 'email' ? 'email' : 'tel'} value={identity} onChange={event => setIdentity(event.target.value)} placeholder={method === 'email' ? 'you@company.com' : '+86 138 0013 8000'} autoComplete={method === 'email' ? 'email' : 'tel'} maxLength={method === 'email' ? 320 : 32} required autoFocus disabled={busy} /></label>
+        {options && !available && <div className="form-error" role="alert">{t("Password reset is currently unavailable. Please contact the administrator.")}</div>}
       </> : <>
-        <label>Verification code<input value={code} onChange={event => setCode(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required autoFocus disabled={busy} /></label>
-        <p className="verification-help">{expired ? 'This code has expired. Request a new code below.' : 'The code expires after 10 minutes. Only the latest code works.'}</p>
-        <label>New password<div className="password-input"><input type={show ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} placeholder="At least 8 characters" minLength={8} maxLength={128} autoComplete="new-password" required disabled={busy} /><button type="button" onClick={() => setShow(!show)} aria-label="Toggle password visibility">{show ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
-        <label>Confirm new password<input type={show ? 'text' : 'password'} value={confirmation} onChange={event => setConfirmation(event.target.value)} minLength={8} maxLength={128} autoComplete="new-password" required disabled={busy} /></label>
+        <label>{t("Verification code")}<input value={code} onChange={event => setCode(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required autoFocus disabled={busy} /></label>
+        <p className="verification-help">{expired ? t("This code has expired. Request a new code below.") : t("The code expires after 10 minutes. Only the latest code works.")}</p>
+        <label>{t("New password")}<div className="password-input"><input type={show ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} placeholder={t("At least 8 characters")} minLength={8} maxLength={128} autoComplete="new-password" required disabled={busy} /><button type="button" onClick={() => setShow(!show)} aria-label={t("Toggle password visibility")}>{show ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
+        <label>{t("Confirm new password")}<input type={show ? 'text' : 'password'} value={confirmation} onChange={event => setConfirmation(event.target.value)} minLength={8} maxLength={128} autoComplete="new-password" required disabled={busy} /></label>
       </>}
-      {error && <div className="form-error" role="alert">{error}</div>}
-      {notice && <p className="verification-help" role="status">{notice}</p>}
-      <button className="button primary auth-submit" disabled={busy || expired || (!challenge && !available)}>{busy ? <span className="spinner" /> : <>{challenge ? 'Reset password' : 'Send reset code'}<ArrowRight size={17} /></>}</button>
-      {challenge && <div className="verification-actions"><button type="button" className="button secondary" disabled={busy || remaining > 0} onClick={resend}>{remaining ? `Resend in ${remaining}s` : 'Resend code'}</button><button type="button" className="button ghost" disabled={busy} onClick={() => { sessionStorage.removeItem(STORAGE_KEY); setChallenge(null); setCode(''); setPassword(''); setConfirmation(''); setError(''); setNotice('') }}>Start over</button></div>}
+      {error && <div className="form-error" role="alert">{systemText(error)}</div>}
+      {notice && <p className="verification-help" role="status">{systemText(notice)}</p>}
+      <button className="button primary auth-submit" disabled={busy || expired || (!challenge && !available)}>{busy ? <span className="spinner" /> : <>{challenge ? t("Reset password") : t("Send reset code")}<ArrowRight size={17} /></>}</button>
+      {challenge && <div className="verification-actions"><button type="button" className="button secondary" disabled={busy || remaining > 0} onClick={resend}>{remaining ? t("Resend in {{count}}s", { count: remaining }) : t("Resend code")}</button><button type="button" className="button ghost" disabled={busy} onClick={() => { sessionStorage.removeItem(STORAGE_KEY); setChallenge(null); setCode(''); setPassword(''); setConfirmation(''); setError(''); setNotice('') }}>{t("Start over")}</button></div>}
     </form>}
-    {!complete && <p className="auth-switch"><Link to="/login">Back to sign in<ArrowRight size={13} /></Link></p>}
+    {!complete && <p className="auth-switch"><Link to="/login">{t("Back to sign in")}<ArrowRight size={13} /></Link></p>}
   </AuthLayout>
 }

@@ -1,3 +1,4 @@
+import { useTranslation } from './i18n'
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { api, getToken } from './api'
@@ -11,13 +12,14 @@ import { SettingsPage } from './pages/SettingsPage'
 import { AdminPage } from './pages/AdminPage'
 
 export default function App() {
+  const { t } = useTranslation()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(Boolean(getToken()))
   useEffect(() => {
     if (!getToken()) return
     api<User>('/me').then(setUser).catch(() => undefined).finally(() => setLoading(false))
   }, [])
-  if (loading) return <div className="app-loading"><LogoMark /><span>Opening your studio…</span></div>
+  if (loading) return <div className="app-loading"><LogoMark /><span>{t("Opening your studio…")}</span></div>
   return <Routes>
     <Route path="/login" element={user ? <Navigate to="/" /> : <AuthPage key="login" onAuth={setUser} /> } />
     <Route path="/register" element={user ? <Navigate to="/" /> : <AuthPage key="register" register onAuth={setUser} />} />
