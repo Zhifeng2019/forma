@@ -18,6 +18,16 @@ from app.studio_static import StudioStaticFiles
 from test_planning_handoff import make_project, saved_context, source_response
 
 
+def test_studio_path_prefix_keeps_origins_separate():
+    configured = Settings(studio_base_url='https://www.riskcat.cn', studio_path_prefix='/forma/')
+    assert configured.studio_path_prefix == '/forma'
+    assert configured.studio_base_url == 'https://www.riskcat.cn'
+    assert configuration_report(configured)['studio_path_prefix'] == '/forma'
+    for invalid in ('forma', 'https://www.riskcat.cn/forma', '/forma?x=1', '/forma/..', '//forma'):
+        with pytest.raises(ValueError, match='STUDIO_PATH_PREFIX'):
+            Settings(studio_path_prefix=invalid)
+
+
 def test_one_absolute_environment_file_and_visible_process_precedence(tmp_path, monkeypatch):
     backend = tmp_path / 'backend'
     backend.mkdir()
@@ -68,7 +78,7 @@ def test_production_spa_routes_preserve_assets_api_errors_and_methods(tmp_path):
 
     production.mount('/', StudioStaticFiles(directory=tmp_path))
     with TestClient(production) as client:
-        for path in ('/', '/login', '/login/', '/register', '/settings', '/admin', '/projects/project-1'):
+        for path in ('/', '/login', '/login/', '/register', '/forgot-password', '/settings', '/admin', '/projects/project-1'):
             response = client.get(path)
             assert response.status_code == 200, path
             assert response.text == '<html>Studio shell</html>'

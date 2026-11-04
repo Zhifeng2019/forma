@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { getToken } from './api'
+import { apiPath } from './paths'
 
 export type ProjectEvent = {
   schema_version: string; id: number; job_id: string; attempt_id: number | null
@@ -94,7 +95,7 @@ export class ProjectEventStream {
     }
     if (this.cursor > 0) headers['Last-Event-ID'] = String(this.cursor)
     const fetchFn = this.options.fetchFn ?? fetch
-    const response = await fetchFn(`/api/projects/${this.projectId}/events?follow=true&heartbeat_seconds=15`, {
+    const response = await fetchFn(apiPath(`/projects/${this.projectId}/events?follow=true&heartbeat_seconds=15`), {
       headers, signal: this.controller.signal,
     })
     if (response.status === 401 || response.status === 404) { this.stop(); return }

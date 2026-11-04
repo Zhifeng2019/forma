@@ -135,7 +135,7 @@ def _base_environment(user_id: int, project_id: str, version: int, context: dict
         'APP_SOURCE_DIR': str(root),
         'APP_EVIDENCE_DIR': str(evidence),
         'APP_PREVIEW_URL': preview_url(project_id, version, preview_token),
-        'FORMA_BASE_URL': studio,
+        'FORMA_BASE_URL': studio + settings.studio_path_prefix,
         'FORMA_TOKEN': token,
         'PROJECT_ID': project_id,
     }

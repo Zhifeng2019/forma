@@ -77,6 +77,10 @@ cd backend
 
 The initial local administrator is `admin@forma.local` with password `admin123`. Change this account before exposing the service publicly. All data is development-local by default under `data/`.
 
+## Deploy to Aliyun ECS
+
+See the [deployment guide for `www.riskcat.cn/forma`](docs/deployment-aliyun-ecs.md). It includes a systemd service, Nginx snippets that coexist with existing applications, wildcard HTTPS for generated apps, and backup/update instructions. Production subpath hosting uses `npm run build -- --base=/forma/` plus `STUDIO_PATH_PREFIX=/forma` in the single `backend/.env` file.
+
 ## Verified registration and administrator approval
 
 New users register with either an email address or a mainland China mobile number. Mobile numbers accept the local 11-digit format, `+86`, or `0086` and are stored as `+86` numbers. Hong Kong, Macau, Taiwan, and other international numbers are not supported. Both registration methods use a six-digit code; a password is required for subsequent sign-in.

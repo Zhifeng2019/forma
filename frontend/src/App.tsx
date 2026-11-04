@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { api, getToken } from './api'
+import { studioPath } from './paths'
 import type { User } from './types'
 import { AuthPage } from './pages/AuthPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
@@ -30,5 +31,5 @@ export default function App() {
 }
 
 export function LogoMark() {
-  return <span className="logo-mark" aria-hidden="true"><i /><i /><i /></span>
+  return <img className="logo-mark" src={studioPath('forma.svg')} alt="" aria-hidden="true" />
 }

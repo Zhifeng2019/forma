@@ -15,6 +15,7 @@ os.environ['DATA_DIR'] = str(TEST_DATA)
 os.environ['SECRET_KEY'] = 'test-secret-key-with-at-least-32-bytes'
 os.environ['RUNTIME_PYTHON'] = sys.executable
 os.environ['STUDIO_BASE_URL'] = 'http://testserver'
+os.environ['STUDIO_PATH_PREFIX'] = ''
 os.environ['APPS_BASE_URL'] = 'http://apps.localhost'
 os.environ['CORS_ORIGINS'] = 'http://localhost:5173,http://127.0.0.1:5173'
 # Each suite starts from the supported source-generation defaults; opt-in

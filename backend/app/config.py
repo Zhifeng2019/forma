@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     secret_key: str = 'forma-local-development-secret-change-in-production'
     cors_origins: str = 'http://localhost:5173,http://127.0.0.1:5173'
     studio_base_url: str = 'http://127.0.0.1:8000'
+    studio_path_prefix: str = ''
     # Wildcard host reserved for generated applications, never studio routes.
     apps_base_url: str = 'http://apps.localhost:8000'
     preview_token_minutes: int = 15
@@ -75,6 +76,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def isolated_application_origins(self):
+        self.studio_path_prefix = self.studio_path_prefix.strip().rstrip('/')
+        if self.studio_path_prefix and not re.fullmatch(r'(?:/[A-Za-z0-9_-]+)+', self.studio_path_prefix):
+            raise ValueError('STUDIO_PATH_PREFIX must be empty or an absolute path such as /forma')
         self.studio_base_url = normalized_origin(self.studio_base_url)
         self.apps_base_url = normalized_origin(self.apps_base_url)
         self.cors_origins = ','.join(normalized_origin(value) for value in self.cors_origins.split(','))
@@ -114,6 +118,7 @@ def configuration_report(config: Settings = settings, env_file: Path = ENV_FILE)
     return {
         'environment_file': str(env_file),
         'environment_file_exists': env_file.is_file(),
+        'studio_path_prefix': config.studio_path_prefix,
         'ignored_environment_files': [str(legacy_env)] if legacy_env.is_file() else [],
         'process_overrides': sorted(key.upper() for key in Settings.model_fields if key.lower() in inherited),
         'generation_path': 'llm-source (local demo when no model is selected)',

@@ -110,6 +110,22 @@ def enabled():
     return Settings(acceptance_gate_v1=True)
 
 
+def test_verification_uses_studio_prefix_without_changing_preview_origin(monkeypatch):
+    from app.security import decode_preview_token
+    from app.verification import runner
+
+    user_id = 950106
+    project_id = verification_project(user_id, [dummy_check()])
+    monkeypatch.setattr(runner.settings, 'studio_base_url', 'https://www.riskcat.cn')
+    monkeypatch.setattr(runner.settings, 'studio_path_prefix', '/forma')
+    environment = runner._base_environment(user_id, project_id, 1, {})
+    assert environment['FORMA_BASE_URL'] == 'https://www.riskcat.cn/forma'
+    assert '/forma/' not in environment['APP_PREVIEW_URL']
+    token = environment['APP_PREVIEW_URL'].rstrip('/').rsplit('/', 1)[1]
+    claims = decode_preview_token(token, project_id, 1)
+    assert claims['parent_origin'] == 'https://www.riskcat.cn'
+
+
 def test_browser_checks_refresh_preview_grants_after_builds(monkeypatch):
     from app.security import decode_preview_token
     from app.verification import runner

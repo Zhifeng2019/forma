@@ -6,7 +6,7 @@ from starlette.exceptions import HTTPException
 from starlette.staticfiles import StaticFiles
 
 
-STUDIO_ROUTES = re.compile(r'^(?:login|register|settings|admin|projects/[A-Za-z0-9_-]+)?/?$')
+STUDIO_ROUTES = re.compile(r'^(?:login|register|forgot-password|settings|admin|projects/[A-Za-z0-9_-]+)?/?$')
 
 
 class StudioStaticFiles(StaticFiles):

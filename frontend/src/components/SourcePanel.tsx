@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Download, FileCode2, Package } from 'lucide-react'
 import { getToken } from '../api'
+import { apiPath } from '../paths'
 import type { Project } from '../types'
 
 export function SourcePanel({ project }: { project: Project }) {
@@ -15,7 +16,7 @@ export function SourcePanel({ project }: { project: Project }) {
   const download = async () => {
     setDownloading(true); setError('')
     try {
-      const response = await fetch(`/api/projects/${project.id}/package?version=${project.current_version}`, {
+      const response = await fetch(apiPath(`/projects/${project.id}/package?version=${project.current_version}`), {
         headers: { Authorization: `Bearer ${getToken() || ''}` },
       })
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Package download failed.')

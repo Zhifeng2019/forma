@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AlertTriangle, CheckCircle2, Clock3, Download, LoaderCircle, Play, ShieldCheck, Sparkles, XCircle } from 'lucide-react'
 import { getToken } from '../api'
+import { apiPath } from '../paths'
 import type { Project, VerificationCheck } from '../types'
 import './VerificationReview.css'
 
@@ -17,7 +18,7 @@ function ArtifactButton({ projectId, version, path, kind, label }: {
     try {
       const token = getToken()
       const response = await fetch(
-        `/api/projects/${projectId}/verification/${kind}?path=${encodeURIComponent(path)}&version=${version}`,
+        apiPath(`/projects/${projectId}/verification/${kind}?path=${encodeURIComponent(path)}&version=${version}`),
         { headers: token ? { Authorization: `Bearer ${token}` } : {} },
       )
       if (!response.ok) throw new Error('The verification artifact is unavailable.')
