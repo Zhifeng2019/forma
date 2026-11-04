@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { api, getToken } from './api'
 import type { User } from './types'
 import { AuthPage } from './pages/AuthPage'
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { Dashboard } from './pages/Dashboard'
 import { Builder } from './pages/Builder'
 import { SettingsPage } from './pages/SettingsPage'
@@ -17,8 +18,9 @@ export default function App() {
   }, [])
   if (loading) return <div className="app-loading"><LogoMark /><span>Opening your studio…</span></div>
   return <Routes>
-    <Route path="/login" element={user ? <Navigate to="/" /> : <AuthPage onAuth={setUser} /> } />
-    <Route path="/register" element={user ? <Navigate to="/" /> : <AuthPage register onAuth={setUser} />} />
+    <Route path="/login" element={user ? <Navigate to="/" /> : <AuthPage key="login" onAuth={setUser} /> } />
+    <Route path="/register" element={user ? <Navigate to="/" /> : <AuthPage key="register" register onAuth={setUser} />} />
+    <Route path="/forgot-password" element={user ? <Navigate to="/" /> : <ForgotPasswordPage />} />
     <Route path="/" element={user ? <Dashboard user={user} onUser={setUser} /> : <Navigate to="/login" />} />
     <Route path="/projects/:id" element={user ? <Builder user={user} onUser={setUser} /> : <Navigate to="/login" />} />
     <Route path="/settings" element={user ? <SettingsPage user={user} onUser={setUser} /> : <Navigate to="/login" />} />

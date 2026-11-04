@@ -8,11 +8,19 @@ import sys
 import pytest
 
 from app import llm
+from app.database import workspace_for
 from app.jobs.context import JobContext, activate_job_context, reset_job_context
 from app.jobs.models import JobCancelledError
 from app.jobs.processes import ProcessTimeoutError, run_process
 from app.runtime import ManagedRuntime, runtime_manager
 from app.security import encrypt_secret
+
+
+@pytest.fixture(autouse=True)
+def cancellation_workspaces():
+    # Requests open existing workspaces; only account setup creates them.
+    for user_id in range(930001, 930005):
+        workspace_for(user_id)
 
 
 def provider():

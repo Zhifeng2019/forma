@@ -6,7 +6,7 @@ import json
 import sqlite3
 
 from ..config import ROOT, settings
-from ..database import workspace_db
+from ..database import control_db, workspace_db
 from .redaction import redact_output
 
 EVENT_SCHEMA_VERSION = '1.0'
@@ -101,11 +101,18 @@ async def follow_frames(
     poll_seconds: float = 0.25,
 ):
     """Tail persisted events without retaining a database connection across awaits."""
+    with control_db() as control:
+        initial_owner = control.execute('SELECT session_version FROM users WHERE id=?', (user_id,)).fetchone()
+    session_version = initial_owner['session_version'] if initial_owner else None
     yield ': heartbeat\n\n'
     yield 'retry: 1500\n\n'
     cursor = after
     idle_seconds = 0.0
     while True:
+        with control_db() as control:
+            owner = control.execute('SELECT status,session_version FROM users WHERE id=?', (user_id,)).fetchone()
+        if not owner or owner['status'] != 'active' or owner['session_version'] != session_version:
+            return
         with workspace_db(user_id) as db:
             events = replay_events(db, project_id, cursor, limit)
         for event in events:

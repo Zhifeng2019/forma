@@ -1,3 +1,4 @@
+import { finishRegistration } from './auth-helpers'
 import { test, expect } from '@playwright/test'
 
 test('plan feedback stays in review until the user starts the first build', async ({ page }) => {
@@ -5,7 +6,7 @@ test('plan feedback stays in review until the user starts the first build', asyn
   await page.getByLabel('Full name').fill('Plan Reviewer')
   await page.getByLabel('Email address').fill(`plan-review-${Date.now()}@example.com`)
   await page.getByLabel('Password', { exact: true }).fill('password123')
-  await page.getByRole('button', { name: 'Create my studio' }).click()
+  await finishRegistration(page)
   await expect(page).toHaveURL('/')
   const token = await page.evaluate(() => localStorage.getItem('forma_token'))
   const headers = { Authorization: `Bearer ${token}` }

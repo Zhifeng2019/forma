@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 from fixtures.preview import open_preview
 import io
 import json
@@ -130,7 +131,7 @@ async def test_invalid_model_package_gets_one_semantic_repair(monkeypatch):
 
 def test_multi_file_package_preview_publish_and_download():
     with TestClient(app) as client:
-        response = client.post('/api/auth/register', json={
+        response = register_account(client, json={
             'email': 'package@example.com', 'name': 'Package Maker', 'password': 'password123',
         })
         token = response.json()['token']

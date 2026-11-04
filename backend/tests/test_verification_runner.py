@@ -7,13 +7,18 @@ import pytest
 from fixtures.archived_appspec import archived_package, spec_artifacts
 
 from app.config import Settings
-from app.database import workspace_db, workspace_for
+from app.database import control_db, init_databases, workspace_db, workspace_for
 from app.features import FeatureDisabledError
 from app.frontend_builder import version_directory
 from app.llm import GenerationError
 from app.runtime import runtime_manager
 from app.spec.schema import appspec_document
 from app.verification.runner import verify_package
+
+
+@pytest.fixture(autouse=True)
+def initialized_control_plane():
+    init_databases()
 
 
 def build_check():
@@ -42,6 +47,9 @@ def dummy_script(status):
 
 
 def verification_project(user_id, checks, browser=False):
+    with control_db() as db:
+        db.execute("INSERT OR IGNORE INTO users(id,email,name,password_hash) VALUES(?,?,'Verification owner','fixture')",
+                   (user_id, f'verification-{user_id}@example.com'))
     workspace_for(user_id)
     project_id = uuid.uuid4().hex
     package = archived_package('multi-file', 'static', phase=1)

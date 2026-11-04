@@ -1,4 +1,5 @@
 """Policy enforcement through the same APIs used by the studio and public apps."""
+from fixtures.accounts import register_account
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -29,7 +30,7 @@ def auth(account):
 
 
 def register(client):
-    response = client.post('/api/auth/register', json={
+    response = register_account(client, json={
         'email': f'policy-{uuid.uuid4().hex}@example.com', 'name': 'Policy User', 'password': 'password123',
     })
     assert response.status_code == 200, response.text
@@ -263,7 +264,7 @@ def test_pre_policy_database_schema_is_migrated_in_place(tmp_path, monkeypatch):
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
         ''')
     project_id = uuid.uuid4().hex
-    with workspace_db(1) as db:
+    with workspace_db(1, create=True) as db:
         db.executescript('''CREATE TABLE projects (
             id TEXT PRIMARY KEY, name TEXT NOT NULL, brief TEXT NOT NULL, description TEXT DEFAULT '',
             stage TEXT DEFAULT 'deploy', stage_index INTEGER DEFAULT 5, phase_index INTEGER DEFAULT 1,

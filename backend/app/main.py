@@ -17,6 +17,7 @@ from .frontend_builder import PackageBuildError, ensure_frontend_build, frontend
 from .studio_static import StudioStaticFiles
 from .hosting import hosting_expiry_loop
 from .policy import hosting_expired
+from .user_activity import UserActivityMiddleware, track_user_activity
 
 init_databases()
 
@@ -36,6 +37,7 @@ async def lifespan(_app):
 
 
 app = FastAPI(title='Forma — AI Product Studio', version='1.3.0', lifespan=lifespan)
+app.add_middleware(UserActivityMiddleware)
 app.add_middleware(CORSMiddleware, allow_origins=[origin.strip().rstrip('/') for origin in settings.cors_origins.split(',')],
                    allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
 app.add_middleware(ApplicationOriginMiddleware)
@@ -70,6 +72,10 @@ async def isolated_preview_runtime(project_id: str, version: int, token: str, pa
 def published_app(project_id: str):
     deployment = get_deployment(project_id)
     if not deployment:
+        raise HTTPException(404, 'This application is not published')
+    track_user_activity(deployment['user_id'])
+    # Recheck after tracking so deletion can drain every request that passed this gate.
+    if not get_deployment(project_id):
         raise HTTPException(404, 'This application is not published')
     if hosting_expired(deployment['hosting_expires_at']):
         raise HTTPException(410, 'Hosting has expired. The owner can publish this application again.')

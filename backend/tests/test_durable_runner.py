@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 import asyncio
 from datetime import datetime, timedelta
 import json
@@ -281,7 +282,7 @@ def test_document_and_migration_wrappers_use_durable_actions(monkeypatch):
 
 
 def register(client: TestClient, label: str) -> dict:
-    response = client.post('/api/auth/register', json={
+    response = register_account(client, json={
         'email': f'{label}-{uuid.uuid4().hex}@example.com',
         'name': 'Durable Tester', 'password': 'password123',
     })

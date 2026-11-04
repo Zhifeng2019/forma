@@ -14,6 +14,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     window.location.href = '/login'
   }
   const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.detail || 'Something went wrong. Please try again.')
+  if (!response.ok) {
+    const detail = data.detail
+    const message = Array.isArray(detail) ? detail.map(item => item.msg).join('. ') : typeof detail === 'string' ? detail : 'Something went wrong. Please try again.'
+    throw new Error(message)
+  }
   return data
 }

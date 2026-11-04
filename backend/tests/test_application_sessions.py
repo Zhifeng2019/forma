@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 import json
 import os
 from pathlib import Path
@@ -49,7 +50,7 @@ def test_malformed_cookies_are_not_forwarded(cookie):
 
 
 def create_cookie_project(client):
-    account = client.post('/api/auth/register', json={
+    account = register_account(client, json={
         'email': f'cookies-{uuid.uuid4().hex}@example.com', 'name': 'Cookie Owner', 'password': 'password123',
     }).json()
     headers = {'Authorization': f'Bearer {account["token"]}'}

@@ -1,3 +1,4 @@
+import { finishRegistration } from './auth-helpers'
 import { test, expect } from '@playwright/test'
 
 test('a user can shape, build, revise, and publish an application', async ({ page }) => {
@@ -6,7 +7,7 @@ test('a user can shape, build, revise, and publish an application', async ({ pag
   await page.getByLabel('Full name').fill('End To End')
   await page.getByLabel('Email address').fill(email)
   await page.getByLabel('Password', { exact: true }).fill('password123')
-  await page.getByRole('button', { name: 'Create my studio' }).click()
+  await finishRegistration(page)
   await expect(page).toHaveURL('/')
   await page.screenshot({ path: 'e2e-artifacts/dashboard.png', fullPage: true })
 
@@ -92,7 +93,7 @@ test('a FastAPI app runs, persists data, and works at its public URL', async ({ 
   await page.getByLabel('Full name').fill('Backend End To End')
   await page.getByLabel('Email address').fill(email)
   await page.getByLabel('Password', { exact: true }).fill('password123')
-  await page.getByRole('button', { name: 'Create my studio' }).click()
+  await finishRegistration(page)
   await expect(page).toHaveURL('/')
   const token = await page.evaluate(() => localStorage.getItem('forma_token'))
   let projectId = ''
@@ -150,7 +151,7 @@ test('autopilot refreshes the workspace through the final preview', async ({ pag
   await page.getByLabel('Full name').fill('Autopilot End To End')
   await page.getByLabel('Email address').fill(email)
   await page.getByLabel('Password', { exact: true }).fill('password123')
-  await page.getByRole('button', { name: 'Create my studio' }).click()
+  await finishRegistration(page)
   const token = await page.evaluate(() => localStorage.getItem('forma_token'))
   let projectId = ''
   try {
@@ -179,7 +180,7 @@ test('an existing app migrates between frontend-only and FastAPI without changin
   await page.getByLabel('Full name').fill('Migration End To End')
   await page.getByLabel('Email address').fill(email)
   await page.getByLabel('Password', { exact: true }).fill('password123')
-  await page.getByRole('button', { name: 'Create my studio' }).click()
+  await finishRegistration(page)
   const token = await page.evaluate(() => localStorage.getItem('forma_token'))
   let projectId = ''
   try {
@@ -239,7 +240,7 @@ test('a multi-file package builds, runs, and downloads for deployment', async ({
   await page.getByLabel('Full name').fill('Package End To End')
   await page.getByLabel('Email address').fill(email)
   await page.getByLabel('Password', { exact: true }).fill('password123')
-  await page.getByRole('button', { name: 'Create my studio' }).click()
+  await finishRegistration(page)
   const token = await page.evaluate(() => localStorage.getItem('forma_token'))
   let projectId = ''
   try {

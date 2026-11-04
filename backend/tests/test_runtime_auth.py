@@ -1,5 +1,6 @@
 """Real dependency imports and authenticated requests through generated-app hosts."""
 
+from fixtures.accounts import register_account
 import asyncio
 import importlib.metadata
 import sys
@@ -67,7 +68,7 @@ def settings(authorization: str = Header(default="")):
 
 def test_app_login_authenticates_private_and_public_requests_without_studio_credentials():
     with TestClient(app) as client:
-        account = client.post('/api/auth/register', json={
+        account = register_account(client, json={
             'email': f'auth-{uuid.uuid4().hex}@example.com', 'name': 'Owner', 'password': 'password123',
         }).json()
         studio_headers = {'Authorization': f'Bearer {account["token"]}'}

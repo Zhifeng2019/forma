@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 import asyncio
 import json
 import uuid
@@ -5,7 +6,7 @@ import uuid
 from fastapi.testclient import TestClient
 
 from app.config import settings
-from app.database import workspace_db, workspace_for
+from app.database import control_db, workspace_db, workspace_for
 from app.jobs.leases import request_cancellation
 from app.jobs.runner import run_generation_job
 from app.jobs.service import create_job, record_event
@@ -13,7 +14,7 @@ from app.main import app
 
 
 def register(client, label):
-    response = client.post('/api/auth/register', json={
+    response = register_account(client, json={
         'email': f'{label}-{uuid.uuid4().hex}@example.com',
         'name': 'Event Tester', 'password': 'password123',
     })
@@ -27,6 +28,9 @@ def auth(token):
 
 def make_project(user_id):
     project_id = uuid.uuid4().hex
+    with control_db() as db:
+        db.execute("INSERT OR IGNORE INTO users(id,email,name,password_hash) VALUES(?,?,'Event owner','fixture')",
+                   (user_id, f'events-{user_id}@example.com'))
     workspace_for(user_id)
     with workspace_db(user_id) as db:
         db.execute('INSERT INTO projects(id,name,brief,stage,backend_mode) VALUES(?,?,?,?,?)',

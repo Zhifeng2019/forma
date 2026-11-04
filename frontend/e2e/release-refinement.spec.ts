@@ -1,9 +1,10 @@
+import { registerAccount } from './auth-helpers'
 import { test, expect } from '@playwright/test'
 
 test('a published app can be refined and reviewed before explicitly republishing', async ({ page }) => {
-  const account = await (await page.request.post('/api/auth/register', { data: {
+  const account = await registerAccount(page.request, {
     email: `release-${Date.now()}@example.com`, name: 'Release Owner', password: 'password123',
-  } })).json()
+  })
   const headers = { Authorization: `Bearer ${account.token}` }
   let projectId = ''
   try {
@@ -22,7 +23,7 @@ test('a published app can be refined and reviewed before explicitly republishing
 
     // These direct visits and refreshes also exercise FastAPI's production SPA routes.
     await page.goto('/login')
-    await expect(page.getByLabel('Email address')).toBeVisible()
+    await expect(page.getByLabel('Email or mobile number')).toBeVisible()
     await page.evaluate(token => localStorage.setItem('forma_token', token), account.token)
     await page.goto('/settings')
     await expect(page.getByRole('heading', { name: 'Configuration', exact: true })).toBeVisible()

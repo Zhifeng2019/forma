@@ -1,3 +1,4 @@
+import { finishRegistration } from './auth-helpers'
 import { test, expect } from '@playwright/test'
 
 test.use({ trace: 'off' })
@@ -9,7 +10,7 @@ test('Activity shows honest local usage and per-job evidence', async ({ page }) 
   await page.getByLabel('Full name').fill('Usage Activity')
   await page.getByLabel('Email address').fill(email)
   await page.getByLabel('Password', { exact: true }).fill('password123')
-  await page.getByRole('button', { name: 'Create my studio' }).click()
+  await finishRegistration(page)
   await expect(page).toHaveURL('/')
   const token = await page.evaluate(() => localStorage.getItem('forma_token'))
   let projectId = ''

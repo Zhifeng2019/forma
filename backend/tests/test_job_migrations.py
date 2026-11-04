@@ -5,7 +5,7 @@ from app.database import control_db, init_databases, workspace_db, workspace_for
 
 def test_existing_version_gains_nullable_context_without_rewriting_history():
     user_id = 975101
-    with workspace_db(user_id) as db:
+    with workspace_db(user_id, create=True) as db:
         db.executescript('''CREATE TABLE versions (
             id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, version INTEGER NOT NULL,
             label TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', backend_mode TEXT NOT NULL DEFAULT 'static',

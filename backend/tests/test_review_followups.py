@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 import asyncio
 import json
 import logging
@@ -98,7 +99,7 @@ def test_studio_route_fallback_does_not_run_on_application_hosts():
 def test_post_release_edits_create_a_draft_without_republishing(monkeypatch, published, phase, durable, defer):
     monkeypatch.setattr(settings, 'durable_jobs_v1', durable)
     with TestClient(app) as client:
-        account = client.post('/api/auth/register', json={
+        account = register_account(client, json={
             'email': f'release-{uuid.uuid4().hex}@example.com', 'name': 'Owner', 'password': 'password123',
         }).json()
         headers = {'Authorization': f'Bearer {account["token"]}'}

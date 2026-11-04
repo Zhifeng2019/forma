@@ -1,3 +1,4 @@
+import { finishRegistration } from './auth-helpers'
 import { test, expect } from '@playwright/test'
 
 test('generated pages cannot read the studio session or control its document', async ({ page, context }) => {
@@ -5,7 +6,7 @@ test('generated pages cannot read the studio session or control its document', a
   await page.getByLabel('Full name').fill('Browser Isolation')
   await page.getByLabel('Email address').fill(`isolation-${Date.now()}@example.com`)
   await page.getByLabel('Password', { exact: true }).fill('password123')
-  await page.getByRole('button', { name: 'Create my studio' }).click()
+  await finishRegistration(page)
   await expect(page).toHaveURL('/')
   const studioOrigin = new URL(page.url()).origin
   const token = await page.evaluate(() => localStorage.getItem('forma_token'))

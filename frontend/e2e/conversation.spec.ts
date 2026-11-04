@@ -1,9 +1,10 @@
+import { registerAccount } from './auth-helpers'
 import { test, expect } from '@playwright/test'
 
 test('questions leave the preview intact and a subsequent change creates a new version', async ({ page }) => {
-  const account = await (await page.request.post('/api/auth/register', { data: {
+  const account = await registerAccount(page.request, {
     email: `conversation-${Date.now()}@example.com`, name: 'Conversation Owner', password: 'password123',
-  } })).json()
+  })
   const headers = { Authorization: `Bearer ${account.token}` }
   let projectId = ''
   try {

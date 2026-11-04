@@ -71,7 +71,7 @@ def recover_interrupted_work(user_id: int, *, startup: bool) -> int:
 
 def _user_ids() -> list[int]:
     with control_db() as db:
-        return [row['id'] for row in db.execute('SELECT id FROM users')]
+        return [row['id'] for row in db.execute("SELECT id FROM users WHERE status!='deleting'")]
 
 
 def recover_all_workspaces(*, startup: bool) -> int:

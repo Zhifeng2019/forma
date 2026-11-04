@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 import asyncio
 import uuid
 
@@ -16,7 +17,7 @@ from app.main import app
 
 
 def register(client, label):
-    response = client.post('/api/auth/register', json={
+    response = register_account(client, json={
         'email': f'{label}-{uuid.uuid4().hex}@example.com',
         'name': 'Cancellation Tester', 'password': 'password123',
     })

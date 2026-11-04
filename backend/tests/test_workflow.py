@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 from fixtures.preview import open_preview
 import time
 
@@ -8,7 +9,7 @@ client = TestClient(app)
 
 
 def register(email, name='Test User'):
-    response = client.post('/api/auth/register', json={'email': email, 'name': name, 'password': 'password123'})
+    response = register_account(client, json={'email': email, 'name': name, 'password': 'password123'})
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -108,7 +109,7 @@ def test_autopilot_reaches_review_without_manual_gates():
 
 def test_deferred_autopilot_reaches_review_in_the_background():
     with TestClient(app) as live:
-        response = live.post('/api/auth/register', json={
+        response = register_account(live, json={
             'email': 'deferred@example.com', 'name': 'Deferred Maker', 'password': 'password123',
         })
         token = response.json()['token']
@@ -165,7 +166,7 @@ def test_feedback_refines_current_phase_without_advancing():
 
 def test_deferred_document_build_and_feedback_actions_update_in_background():
     with TestClient(app) as live:
-        response = live.post('/api/auth/register', json={
+        response = register_account(live, json={
             'email': 'deferred-actions@example.com', 'name': 'Deferred Actions', 'password': 'password123',
         })
         token = response.json()['token']

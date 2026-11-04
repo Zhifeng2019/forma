@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 import uuid
 
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ def auth(token):
 
 
 def register(client, label):
-    response = client.post('/api/auth/register', json={
+    response = register_account(client, json={
         'email': f'{label}-{uuid.uuid4().hex}@example.com',
         'name': 'Deployment Tester', 'password': 'password123',
     })

@@ -1,16 +1,60 @@
 from typing import Literal
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, model_validator, field_validator
+from .authentication.identities import canonical_phone
 
 
-class RegisterInput(BaseModel):
-    email: EmailStr
+class ContactInput(BaseModel):
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, max_length=32)
+
+    @model_validator(mode='after')
+    def one_contact(self):
+        if (self.email is None) == (self.phone is None):
+            raise ValueError('Provide either an email address or a mainland China mobile number')
+        if self.phone is not None:
+            self.phone = canonical_phone(self.phone)
+        return self
+
+
+class RegisterInput(ContactInput):
     name: str = Field(min_length=2, max_length=80)
     password: str = Field(min_length=8, max_length=128)
 
+    @field_validator('name')
+    @classmethod
+    def valid_name(cls, value):
+        if len(value.strip()) < 2:
+            raise ValueError('Enter a name with at least 2 characters')
+        return value.strip()
+
 
 class LoginInput(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
-    password: str
+    identifier: str | None = Field(default=None, min_length=3, max_length=320)
+    email: str | None = Field(default=None, min_length=3, max_length=320)
+    password: str = Field(max_length=128)
+
+    @model_validator(mode='after')
+    def login_identity(self):
+        if (self.identifier is None) == (self.email is None):
+            raise ValueError('Provide one email address or mobile number to sign in')
+        return self
+
+
+class ResendRegistrationInput(BaseModel):
+    challenge_id: str = Field(pattern=r'^[a-f0-9]{32}$')
+
+
+class VerifyRegistrationInput(ResendRegistrationInput):
+    code: str = Field(pattern=r'^[0-9]{6}$')
+
+
+class ResetPasswordInput(VerifyRegistrationInput):
+    password: str = Field(min_length=8, max_length=128)
+
+
+class UserUpdateInput(BaseModel):
+    status: Literal['active', 'disabled', 'rejected'] | None = None
+    role: Literal['admin', 'user'] | None = None
 
 
 class ProviderInput(BaseModel):

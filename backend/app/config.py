@@ -5,7 +5,8 @@ import logging
 import os
 import re
 from urllib.parse import urlsplit
-from pydantic import model_validator
+from typing import Literal
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +40,23 @@ class Settings(BaseSettings):
     apps_base_url: str = 'http://apps.localhost:8000'
     preview_token_minutes: int = 15
     access_token_days: int = 14
+    auth_email_delivery_enabled: bool = False
+    smtp_host: str = ''
+    smtp_port: int = Field(default=465, ge=1, le=65535)
+    smtp_tls_mode: Literal['ssl', 'starttls'] = 'ssl'
+    smtp_username: str = ''
+    smtp_password: str = ''
+    smtp_from_address: str = ''
+    smtp_from_name: str = 'Forma Studio'
+    auth_sms_delivery_enabled: bool = False
+    alibaba_cloud_access_key_id: str = ''
+    alibaba_cloud_access_key_secret: str = ''
+    alibaba_cloud_security_token: str = ''
+    aliyun_sms_sign_name: str = ''
+    aliyun_sms_registration_template_code: str = ''
+    aliyun_sms_password_reset_template_code: str = ''
+    aliyun_sms_code_param: str = 'code'
+    auth_delivery_transport_timeout_seconds: float = Field(default=15, ge=1, le=60, allow_inf_nan=False)
     runtime_python: str = ''
     runtime_pip_index_url: str = 'https://mirrors.aliyun.com/pypi/simple/'
     runtime_npm_registry: str = 'https://registry.npmmirror.com'

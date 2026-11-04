@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 import asyncio
 import hashlib
 import json
@@ -174,7 +175,7 @@ def test_package_repair_keeps_snapshot_and_cannot_overwrite_reviewed_plan(monkey
 def test_plan_feedback_requires_explicit_first_build_approval(monkeypatch, durable, defer):
     monkeypatch.setattr(settings, 'durable_jobs_v1', durable)
     with TestClient(app) as client:
-        account = client.post('/api/auth/register', json={
+        account = register_account(client, json={
             'email': f'plan-{uuid.uuid4().hex}@example.com', 'name': 'Plan Reviewer', 'password': 'password123',
         }).json()
         headers = {'Authorization': f'Bearer {account["token"]}'}
@@ -203,7 +204,7 @@ def test_plan_feedback_requires_explicit_first_build_approval(monkeypatch, durab
         assert project['current_version'] == 1 and project['phase_index'] == 1
         provenance = client.get(f'/api/projects/{project_id}/versions/1/context', headers=headers).json()
         assert provenance['recorded'] and provenance['context']['documents']['plan.md']['content'] == plan
-        other = client.post('/api/auth/register', json={
+        other = register_account(client, json={
             'email': f'other-{uuid.uuid4().hex}@example.com', 'name': 'Other Reviewer', 'password': 'password123',
         }).json()
         assert client.get(f'/api/projects/{project_id}/versions/1/context').status_code == 401

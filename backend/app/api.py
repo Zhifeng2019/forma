@@ -2,16 +2,16 @@ import asyncio
 import json
 from pathlib import PurePosixPath
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 import httpx
 from .database import control_db, workspace_db, rows
 from .deps import current_user, admin_user, owned_project
-from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput, VerificationInput, ArchitectureInput, StudioPolicyInput
+from .schemas import RegisterInput, LoginInput, ProviderInput, PreferenceInput, ProjectInput, MessageInput, StageInput, PublishInput, VerificationInput, ArchitectureInput, StudioPolicyInput, ResendRegistrationInput, VerifyRegistrationInput, UserUpdateInput
 from .policy import can_configure_llm, effective_provider_id, hosting_deadline, hosting_expired, selectable_provider, studio_policy
 from .verification.runner import verify_package
 from .verification.review import latest_model_review
-from .security import hash_password, verify_password, create_token, encrypt_secret, decrypt_secret
+from .security import verify_password, create_token, encrypt_secret, decrypt_secret
 from .security import create_preview_token, decode_preview_token
 from .app_origins import application_origin, preview_url, published_url, studio_origins
 from .application_auth import APPLICATION_REQUEST_HEADERS, application_cookie
@@ -37,6 +37,13 @@ from .spec.review import appspec_review
 from .spec.schema import parse_appspec
 from .deployment_registry import delete_deployment, upsert_deployment
 from .hosting import publication_lock
+from .authentication import delivery as auth_delivery
+from .authentication.service import begin_registration, resend_registration, verify_registration
+from .authentication.identities import canonical_phone
+from .user_activity import track_user_activity
+from .user_deletion import delete_account
+from .schemas import ContactInput, ResetPasswordInput
+from .authentication.password_reset import begin_password_reset, resend_password_reset, confirm_password_reset
 
 router = APIRouter(prefix='/api')
 _generation_jobs: dict[asyncio.Task, tuple[int, str]] = {}
@@ -121,34 +128,85 @@ async def cancel_generation_jobs() -> None:
                 add_event(db, project_id, 'Generation stopped when the studio shut down. Retry this stage.', 'error')
 
 
+async def cancel_user_jobs(user_id: int) -> None:
+    jobs = [(task, job) for task, job in list(_generation_jobs.items()) + list(_verification_jobs.items())
+            if job[0] == user_id]
+    for task, _job in jobs:
+        task.cancel()
+    if jobs:
+        await asyncio.gather(*(task for task, _job in jobs), return_exceptions=True)
+    for _task, job in jobs:
+        _autopilot.pop(job[1], None)
+
+
 def auth_payload(user):
-    return {'token': create_token(user['id']), 'user': {'id': user['id'], 'email': user['email'], 'name': user['name'], 'role': user['role']}}
+    return {'token': create_token(user['id'], user['session_version']), 'user': {
+        key: user[key] for key in ('id', 'email', 'phone', 'name', 'role', 'status')
+    }}
+
+
+@router.get('/auth/registration-options')
+def registration_options():
+    status = auth_delivery.configuration_status()
+    return {'email_available': status['email']['available'], 'sms_available': status['sms']['available'],
+            'approval_required': True}
 
 
 @router.post('/auth/register')
-def register(body: RegisterInput):
-    with control_db() as db:
-        if db.execute('SELECT 1 FROM users WHERE email=?', (body.email.lower(),)).fetchone():
-            raise HTTPException(409, 'An account with this email already exists')
-        cursor = db.execute('INSERT INTO users(email,name,password_hash) VALUES(?,?,?)',
-                            (body.email.lower(), body.name.strip(), hash_password(body.password)))
-        user_id = cursor.lastrowid
-        db.execute('INSERT INTO preferences(user_id) VALUES(?)', (user_id,))
-        user = db.execute('SELECT * FROM users WHERE id=?', (user_id,)).fetchone()
-    from .database import workspace_for
-    workspace_for(user_id)
-    return auth_payload(user)
+def register(body: RegisterInput, request: Request):
+    return begin_registration(body, request.client.host if request.client else 'unknown')
+
+
+@router.post('/auth/register/resend')
+def resend_registration_code(body: ResendRegistrationInput, request: Request):
+    return resend_registration(body.challenge_id, request.client.host if request.client else 'unknown')
+
+
+@router.post('/auth/register/verify')
+def complete_registration(body: VerifyRegistrationInput):
+    return verify_registration(body.challenge_id, body.code)
 
 
 @router.post('/auth/login')
 def login(body: LoginInput):
+    identity = (body.identifier or body.email or '').strip()
+    column = 'email' if '@' in identity else 'phone'
+    try:
+        identity = identity.lower() if column == 'email' else canonical_phone(identity)
+    except ValueError:
+        raise HTTPException(401, 'Email, mobile number, or password is incorrect') from None
     with control_db() as db:
-        user = db.execute('SELECT * FROM users WHERE email=?', (body.email.lower(),)).fetchone()
+        user = db.execute(f'SELECT * FROM users WHERE {column}=?', (identity,)).fetchone()
     if not user or not verify_password(body.password, user['password_hash']):
-        raise HTTPException(401, 'Email or password is incorrect')
+        raise HTTPException(401, 'Email, mobile number, or password is incorrect')
+    if user['status'] == 'pending':
+        raise HTTPException(403, 'Your registration is awaiting administrator approval. Please try signing in after approval.')
+    if user['status'] == 'rejected':
+        raise HTTPException(403, 'Your registration was not approved. Please contact the administrator.')
     if user['status'] != 'active':
         raise HTTPException(403, 'This account has been disabled')
     return auth_payload(user)
+
+
+@router.get('/auth/password-reset/options')
+def password_reset_options():
+    status = auth_delivery.configuration_status('password_reset')
+    return {'email_available': status['email']['available'], 'sms_available': status['sms']['available']}
+
+
+@router.post('/auth/password-reset')
+def request_password_reset(body: ContactInput, request: Request, background_tasks: BackgroundTasks):
+    return begin_password_reset(body, request.client.host if request.client else 'unknown', background_tasks)
+
+
+@router.post('/auth/password-reset/resend')
+def resend_password_reset_code(body: ResendRegistrationInput, request: Request, background_tasks: BackgroundTasks):
+    return resend_password_reset(body.challenge_id, request.client.host if request.client else 'unknown', background_tasks)
+
+
+@router.post('/auth/password-reset/confirm')
+def complete_password_reset(body: ResetPasswordInput):
+    return confirm_password_reset(body.challenge_id, body.code, body.password)
 
 
 @router.get('/me')
@@ -159,25 +217,50 @@ def me(user=Depends(current_user)):
 @router.get('/admin/users')
 def list_users(_admin=Depends(admin_user)):
     with control_db() as db:
-        users = rows(db.execute('SELECT id,email,name,role,status,created_at FROM users ORDER BY created_at DESC'))
+        users = rows(db.execute("""SELECT id,email,phone,name,role,status,created_at,verified_at,reviewed_at,reviewed_by
+            FROM users ORDER BY (status='pending') DESC,created_at DESC,id DESC"""))
     for user in users:
-        with workspace_db(user['id']) as workspace:
-            user['project_count'] = workspace.execute('SELECT COUNT(*) FROM projects').fetchone()[0]
+        user['project_count'] = 0
+        if (settings.data_path / 'users' / f'user_{user["id"]}.db').exists():
+            with workspace_db(user['id']) as workspace:
+                user['project_count'] = workspace.execute('SELECT COUNT(*) FROM projects').fetchone()[0]
     return users
 
 
 @router.patch('/admin/users/{user_id}')
-def update_user(user_id: int, body: dict, admin=Depends(admin_user)):
-    allowed = {'active', 'disabled'}
-    if body.get('status') not in allowed and body.get('role') not in {'admin', 'user'}:
+def update_user(user_id: int, body: UserUpdateInput, admin=Depends(admin_user)):
+    if body.status is None and body.role is None:
         raise HTTPException(400, 'No valid changes supplied')
-    if user_id == admin['id'] and body.get('status') == 'disabled':
-        raise HTTPException(400, 'You cannot disable your own account')
     with control_db() as db:
-        if body.get('status') in allowed:
-            db.execute('UPDATE users SET status=? WHERE id=?', (body['status'], user_id))
-        if body.get('role') in {'admin', 'user'}:
-            db.execute('UPDATE users SET role=? WHERE id=?', (body['role'], user_id))
+        db.execute('BEGIN IMMEDIATE')
+        target = db.execute('SELECT * FROM users WHERE id=?', (user_id,)).fetchone()
+        if not target:
+            raise HTTPException(404, 'User not found')
+        if target['status'] == 'deleting':
+            raise HTTPException(409, 'This account is being deleted. Retry deletion to finish cleanup.')
+        status = body.status or target['status']
+        role = body.role or target['role']
+        if user_id == admin['id'] and (status != 'active' or role != 'admin'):
+            raise HTTPException(400, 'You cannot disable or demote your own administrator account')
+        if target['status'] in {'pending', 'rejected'}:
+            if not target['verified_at']:
+                raise HTTPException(409, 'This applicant must verify their contact before approval')
+            if body.role is not None:
+                raise HTTPException(409, 'Approve registration before changing the account role')
+            if body.status not in {'active', 'rejected'}:
+                raise HTTPException(409, 'Approve or reject this registration request')
+            db.execute('UPDATE users SET status=?,reviewed_at=CURRENT_TIMESTAMP,reviewed_by=? WHERE id=?',
+                       (status, admin['id'], user_id))
+        else:
+            if status == 'rejected':
+                raise HTTPException(409, 'Only registration requests can be rejected. Disable an existing account instead.')
+            db.execute('UPDATE users SET status=?,role=? WHERE id=?', (status, role, user_id))
+    return {'ok': True}
+
+
+@router.delete('/admin/users/{user_id}')
+async def delete_user(user_id: int, admin=Depends(admin_user)):
+    await delete_account(user_id, admin['id'], cancel_user_jobs)
     return {'ok': True}
 
 
@@ -958,7 +1041,7 @@ def preview_session(project_id: str, request: Request, response: Response, versi
     parent_origin = request.headers.get('origin', settings.studio_base_url).rstrip('/')
     if parent_origin not in studio_origins():
         raise HTTPException(403, 'Preview sessions must be opened from the studio')
-    token, expires = create_preview_token(user['id'], project_id, selected, parent_origin)
+    token, expires = create_preview_token(user['id'], project_id, selected, parent_origin, user['session_version'])
     response.headers['Cache-Control'] = 'no-store'
     return {'url': preview_url(project_id, selected, token),
             'origin': application_origin(project_id, selected), 'expires_at': expires,
@@ -971,6 +1054,7 @@ def preview_owner(project_id: str, version: int, token: str) -> dict:
         user_id = int(grant['sub'])
     except Exception as exc:
         raise HTTPException(401, 'A valid preview session is required') from exc
+    track_user_activity(int(grant['sub']))
     with control_db() as db:
         user = db.execute('SELECT status FROM users WHERE id=?', (user_id,)).fetchone()
     if not user or user['status'] != 'active':

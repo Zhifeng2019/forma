@@ -563,8 +563,12 @@ class RuntimeManager:
     async def remove_project(self, project_id: str) -> None:
         await self.stop_project(project_id)
         root = settings.data_path / 'projects' / project_id
-        if root.exists():
+        if root.exists() or root.is_symlink():
             remove_tree(root)
+        for cache in (self._logs, self._errors):
+            for key in list(cache):
+                if key.startswith(project_id + ':'):
+                    cache.pop(key, None)
 
     async def _make_capacity(self, requested_key: str) -> None:
         for key, runtime in list(self._runtimes.items()):

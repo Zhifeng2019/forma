@@ -4,7 +4,7 @@ Forma is an AI-native application builder built around a guided product-developm
 
 ## What is included
 
-- Email registration, login, account roles, and admin user controls.
+- Email or mainland China mobile registration with verification codes, administrator approval, password login, and admin user controls.
 - Shared control-plane SQLite database and one isolated SQLite workspace per user.
 - OpenAI-compatible provider management with encrypted API keys and connection tests.
 - An offline **Forma Local** engine for deterministic demos without external credentials.
@@ -33,8 +33,9 @@ Forma is an AI-native application builder built around a guided product-developm
 Copy `.env.example` to `backend/.env` and configure your local secrets there. The backend reads
 `backend/.env`; exported process variables take precedence. Use Node.js 24 for the frontend tools.
 This is the only environment file Forma loads, regardless of the working directory or launcher.
-The root `.env` is ignored, and `.env.example` is the sole template. Startup logs identify the
-active file, ignored root file if present, process override names, generation path, and effective
+Keep only `backend/.env`; do not create a root `.env`, which the app ignores. `.env.example`
+is a template, not a loaded configuration file. Startup logs identify the active file, any ignored
+root file, process override names, generation path, and effective
 feature flags. Secrets and provider credentials are excluded from that report.
 
 ```bash
@@ -75,6 +76,36 @@ cd backend
 ```
 
 The initial local administrator is `admin@forma.local` with password `admin123`. Change this account before exposing the service publicly. All data is development-local by default under `data/`.
+
+## Verified registration and administrator approval
+
+New users register with either an email address or a mainland China mobile number. Mobile numbers accept the local 11-digit format, `+86`, or `0086` and are stored as `+86` numbers. Hong Kong, Macau, Taiwan, and other international numbers are not supported. Both registration methods use a six-digit code; a password is required for subsequent sign-in.
+
+1. Enter a name, contact, and password, then select **Send verification code**.
+2. Enter the email or SMS code. Only after successful verification is the account created with **Awaiting approval** status.
+3. An administrator opens **Admin → User management**, filters **Pending only**, and chooses **Approve** or **Reject**. Verified applicants are listed first. The reviewer and review time are recorded.
+4. Approved users sign in with their email or mobile number and password. Pending, rejected, and disabled accounts cannot obtain or use studio sessions. Approval does not send an additional email/SMS notification; users can check their status by signing in.
+
+Existing accounts retain their IDs, passwords, roles, workspaces, and access when upgrading; they are not retroactively claimed to be contact-verified. The initial local administrator remains available for configuring the system and reviewing registrations.
+
+Administrators can select **Delete** in **User management** and confirm permanent account removal. This stops the user's active work and hosted apps, then removes all their projects, application databases, source/build files, workspace history, personal model providers, preferences, and verification records. Shared administrator-managed providers and other users' data remain available. Administrators cannot delete their own account. If cleanup fails, the account stays blocked with **Retry delete** available; its contact is released only after cleanup succeeds. The same email or phone can then register again with a new account ID, fresh verification, and administrator approval. Previous sessions cannot access the new account.
+
+Configure delivery in `backend/.env` using the settings in `.env.example`. No credentials are copied from the reference application. Both channels default to disabled; registration remains unavailable until at least one delivery method is configured and enabled:
+
+- **Email:** set `AUTH_EMAIL_DELIVERY_ENABLED=true`, `SMTP_HOST`, `SMTP_FROM_ADDRESS`, and the SMTP authentication credentials as needed. Use `SMTP_TLS_MODE=ssl` (typically port 465) or `starttls` (typically port 587). TLS certificate validation is required; plaintext SMTP is unsupported.
+- **SMS:** set `AUTH_SMS_DELIVERY_ENABLED=true`, `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, `ALIYUN_SMS_SIGN_NAME`, and the approved `ALIYUN_SMS_REGISTRATION_TEMPLATE_CODE`. `ALIYUN_SMS_CODE_PARAM` defaults to `code`; set it to the template's verification-code parameter. Temporary credentials may also supply `ALIBABA_CLOUD_SECURITY_TOKEN`. The adapter uses Alibaba Cloud's mainland China `SendSms` endpoint and ACS3 request signing, following the supplied ai_chat authentication implementation.
+
+Codes expire after 10 minutes, allow at most five incorrect guesses, and are invalidated by resending. Requests enforce a 60-second cooldown, five sends per contact per hour, and 20 sends per client IP per hour, including failed deliveries. Resending does not reset incorrect guesses. Counters and challenges persist across restarts. Contact details in pending challenges are encrypted, codes use a keyed hash, and passwords use the existing password hash. Successful verification consumes all competing challenges for that contact. Old challenges and rate records are pruned on subsequent send requests. Delivery failures never grant an account or a session, and SMS requests are not automatically retried when delivery acceptance is uncertain.
+
+Browser tests launch `backend/tests/browser_app.py` against a separate temporary database and replace only the delivery adapter with a local test mailbox. Production continues to launch `app.main:app`; no production test-code or auto-approval switch exists. Existing feature tests provision approved fixtures; registration tests exercise the full verification and review flow. Do not run the browser test entrypoint as a production service.
+
+## Password recovery
+
+Select **Forgot password?** on the sign-in page, choose email or mainland China mobile, and enter the registered contact. Enter the six-digit code and a new password (8–128 characters), then sign in again. Password reset preserves account approval, role, projects, and settings; it cannot approve pending or rejected accounts or reactivate disabled accounts.
+
+Recovery uses the SMTP and Aliyun delivery settings in `backend/.env`. Email has dedicated password-reset wording. SMS uses `ALIYUN_SMS_PASSWORD_RESET_TEMPLATE_CODE` when set, otherwise the existing verification template in `ALIYUN_SMS_REGISTRATION_TEMPLATE_CODE`. Set the optional reset template if your approved SMS template is specific to registration; its code parameter must match `ALIYUN_SMS_CODE_PARAM`. No second `.env` file is used.
+
+Reset codes are stored as purpose-specific hashes, expire after 10 minutes, allow five incorrect attempts, and can be resent after 60 seconds. Resending preserves the attempt count. Registration and recovery share the contact/IP send limits. Requests return the same acknowledgement for known and unknown contacts; message delivery runs after that response, and delivery failures never change a password. A successful reset consumes all outstanding reset requests for the account and invalidates previous sign-in and preview sessions. Deleting a user also removes their reset requests. The browser retains only the masked challenge while a reset is in progress, never the password or code.
 
 ## Studio policy
 

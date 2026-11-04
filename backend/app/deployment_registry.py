@@ -9,8 +9,9 @@ from .policy import hosting_deadline, studio_policy
 
 def get_deployment(project_id: str) -> dict | None:
     with control_db() as db:
-        row = db.execute('''SELECT project_id,user_id,published_version,backend_mode,source_format,runtime_metadata,hosting_expires_at
-            FROM deployment_registry WHERE project_id=?''', (project_id,)).fetchone()
+        row = db.execute('''SELECT d.project_id,d.user_id,d.published_version,d.backend_mode,d.source_format,
+            d.runtime_metadata,d.hosting_expires_at FROM deployment_registry d
+            JOIN users u ON u.id=d.user_id WHERE d.project_id=? AND u.status!='deleting' ''', (project_id,)).fetchone()
     if not row:
         return None
     return {

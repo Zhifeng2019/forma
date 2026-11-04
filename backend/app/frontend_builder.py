@@ -152,6 +152,15 @@ _node_locks: dict[int, asyncio.Lock] = {}
 _build_locks: dict[str, asyncio.Lock] = {}
 
 
+async def remove_user_environment(user_id: int) -> None:
+    async with _node_locks.setdefault(user_id, asyncio.Lock()):
+        _remove_tree(settings.data_path / 'node' / f'user_{user_id}')
+    _node_locks.pop(user_id, None)
+    for key in list(_build_locks):
+        if key.startswith(f'{user_id}:'):
+            _build_locks.pop(key, None)
+
+
 async def ensure_node_environment(user_id: int) -> Path:
     root = settings.data_path / 'node' / f'user_{user_id}'
     node, npm = _node_binaries()

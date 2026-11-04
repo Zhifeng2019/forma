@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 import asyncio
 import json
 import time
@@ -17,7 +18,7 @@ from app.schemas import MessageInput
 @pytest.fixture
 def workspace():
     with TestClient(app) as client:
-        account = client.post('/api/auth/register', json={
+        account = register_account(client, json={
             'email': f'conversation-{uuid.uuid4().hex}@example.com', 'name': 'Owner', 'password': 'password123',
         }).json()
         headers = {'Authorization': f'Bearer {account["token"]}'}
@@ -226,7 +227,7 @@ def test_empty_or_other_owners_messages_do_not_reach_routing(workspace, monkeypa
     before = state(user_id, project_id)
     assert client.post(f'/api/projects/{project_id}/messages', headers=headers,
                        json={'content': '   '}).status_code == 422
-    other = client.post('/api/auth/register', json={
+    other = register_account(client, json={
         'email': f'other-{uuid.uuid4().hex}@example.com', 'name': 'Other', 'password': 'password123',
     }).json()
     assert client.post(f'/api/projects/{project_id}/messages',

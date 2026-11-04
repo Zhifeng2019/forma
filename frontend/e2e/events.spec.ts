@@ -1,3 +1,4 @@
+import { finishRegistration } from './auth-helpers'
 import { test, expect } from '@playwright/test'
 
 test.use({ trace: 'off' })
@@ -18,7 +19,7 @@ test('a manual build resumes event delivery from its last cursor', async ({ page
     await page.getByLabel('Full name').fill('Event Recovery')
     await page.getByLabel('Email address').fill(email)
     await page.getByLabel('Password', { exact: true }).fill('password123')
-    await page.getByRole('button', { name: 'Create my studio' }).click()
+    await finishRegistration(page)
     await expect(page).toHaveURL('/')
     return page.evaluate(() => localStorage.getItem('forma_token'))
   })
@@ -73,7 +74,7 @@ test('autopilot reaches the final preview without duplicate versions', async ({ 
     await page.getByLabel('Full name').fill('Autopilot Events')
     await page.getByLabel('Email address').fill(email)
     await page.getByLabel('Password', { exact: true }).fill('password123')
-    await page.getByRole('button', { name: 'Create my studio' }).click()
+    await finishRegistration(page)
     await expect(page).toHaveURL('/')
     return page.evaluate(() => localStorage.getItem('forma_token'))
   })

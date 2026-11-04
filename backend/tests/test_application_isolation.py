@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 import time
 import uuid
 from urllib.parse import urlsplit
@@ -16,7 +17,7 @@ from app.security import _preview_key, decode_preview_token, decode_token
 @pytest.fixture
 def workspace():
     with TestClient(app) as client:
-        account = client.post('/api/auth/register', json={
+        account = register_account(client, json={
             'email': f'isolation-{uuid.uuid4().hex}@example.com', 'name': 'Isolation', 'password': 'password123',
         }).json()
         headers = {'Authorization': f'Bearer {account["token"]}'}

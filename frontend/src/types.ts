@@ -1,4 +1,8 @@
-export type User = { id: number; email: string; name: string; role: 'admin' | 'user'; status?: string; created_at?: string; project_count?: number }
+export type User = {
+  id: number; email: string | null; phone?: string | null; name: string; role: 'admin' | 'user'
+  status?: 'active' | 'disabled' | 'pending' | 'rejected' | 'deleting'; created_at?: string; project_count?: number
+  verified_at?: string | null; reviewed_at?: string | null; reviewed_by?: number | null
+}
 export type Provider = {
   id: number; name: string; base_url: string; model: string; enabled: number; has_key: boolean; created_at: string
   input_price_per_million: number | null; output_price_per_million: number | null; currency: string

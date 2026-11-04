@@ -20,7 +20,7 @@ export function Layout({ user, onUser, children, wide = false }: { user: User; o
       </nav>
       <div className="account-wrap">
         <button className="account-button" onClick={() => setMenu(!menu)}><span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span><span>{user.name}</span><ChevronDown size={14} /></button>
-        {menu && <div className="account-menu"><div><strong>{user.name}</strong><small>{user.email}</small></div><button onClick={() => navigate('/settings')}><CircleUserRound size={16} />Preferences</button><button onClick={logout}><LogOut size={16} />Sign out</button></div>}
+        {menu && <div className="account-menu"><div><strong>{user.name}</strong><small>{user.email || user.phone}</small></div><button onClick={() => navigate('/settings')}><CircleUserRound size={16} />Preferences</button><button onClick={logout}><LogOut size={16} />Sign out</button></div>}
       </div>
     </header>
     <main className={wide ? 'site-content wide' : 'site-content'}>{children}</main>

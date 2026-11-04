@@ -1,3 +1,4 @@
+import { registerAccount } from './auth-helpers'
 import { test, expect } from '@playwright/test'
 
 test('administrators control model access, project quotas, and hosting periods', async ({ page, browser }) => {
@@ -6,8 +7,7 @@ test('administrators control model access, project quotas, and hosting periods',
   const admin = await adminResponse.json()
   const adminHeaders = { Authorization: `Bearer ${admin.token}` }
   const original = await (await page.request.get('/api/policy', { headers: adminHeaders })).json()
-  const registration = await page.request.post('/api/auth/register', { data: { email: `policy-ui-${Date.now()}@example.com`, name: 'Policy Member', password: 'password123' } })
-  const user = await registration.json()
+  const user = await registerAccount(page.request, { email: `policy-ui-${Date.now()}@example.com`, name: 'Policy Member', password: 'password123' })
   const userHeaders = { Authorization: `Bearer ${user.token}` }
   let projectId = ''
   let privateId: number | null = null

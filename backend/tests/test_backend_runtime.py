@@ -1,3 +1,4 @@
+from fixtures.accounts import register_account
 from app.app_origins import published_url
 from fixtures.preview import open_preview
 import json
@@ -21,7 +22,7 @@ def auth(token):
 
 
 def register(client, email):
-    response = client.post('/api/auth/register', json={
+    response = register_account(client, json={
         'email': email, 'name': 'Backend Maker', 'password': 'password123',
     })
     assert response.status_code == 200, response.text

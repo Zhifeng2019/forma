@@ -3,12 +3,40 @@ from contextlib import contextmanager
 from pathlib import Path
 from .config import settings
 
-CONTROL_SCHEMA = '''
+USERS_SCHEMA = '''
 CREATE TABLE IF NOT EXISTS users (
- id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, phone TEXT UNIQUE,
  name TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user',
- status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+ status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ verified_at TEXT, reviewed_at TEXT, reviewed_by INTEGER,
+ session_version INTEGER NOT NULL DEFAULT 0
 );
+'''
+
+CONTROL_SCHEMA = USERS_SCHEMA + '''
+CREATE TABLE IF NOT EXISTS registration_challenges (
+ id TEXT PRIMARY KEY, channel TEXT NOT NULL, identity_key TEXT NOT NULL,
+ destination_encrypted TEXT NOT NULL, name TEXT NOT NULL, password_hash TEXT NOT NULL,
+ code_hash TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 1,
+ attempts INTEGER NOT NULL DEFAULT 0, delivery_status TEXT NOT NULL DEFAULT 'sending',
+ created_at REAL NOT NULL, expires_at REAL NOT NULL, last_sent_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_registration_identity ON registration_challenges(identity_key);
+CREATE TABLE IF NOT EXISTS password_reset_challenges (
+ id TEXT PRIMARY KEY, user_id INTEGER, session_version INTEGER,
+ channel TEXT NOT NULL, identity_key TEXT NOT NULL, destination_encrypted TEXT NOT NULL,
+ code_hash TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 1,
+ attempts INTEGER NOT NULL DEFAULT 0, delivery_status TEXT NOT NULL DEFAULT 'sending',
+ created_at REAL NOT NULL, expires_at REAL NOT NULL, last_sent_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_challenges(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_identity ON password_reset_challenges(identity_key);
+CREATE TABLE IF NOT EXISTS auth_rate_events (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, identity_key TEXT NOT NULL, ip_key TEXT NOT NULL,
+ kind TEXT NOT NULL, created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_rate_identity ON auth_rate_events(kind,identity_key,created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_rate_ip ON auth_rate_events(kind,ip_key,created_at);
 CREATE TABLE IF NOT EXISTS providers (
  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base_url TEXT NOT NULL,
  model TEXT NOT NULL, api_key_encrypted TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
@@ -124,8 +152,9 @@ CREATE INDEX IF NOT EXISTS idx_usage_ledger_job ON usage_ledger(job_id);
 '''
 
 
-def connect(path: Path):
-    db = sqlite3.connect(path, timeout=20, check_same_thread=False)
+def connect(path: Path, *, create: bool = True):
+    db = sqlite3.connect(path if create else path.as_uri() + '?mode=rw', uri=not create,
+                         timeout=20, check_same_thread=False)
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')
     db.execute('PRAGMA journal_mode=WAL')
@@ -143,8 +172,9 @@ def control_db():
 
 
 @contextmanager
-def workspace_db(user_id: int):
-    db = connect(settings.data_path / 'users' / f'user_{user_id}.db')
+def workspace_db(user_id: int, *, create: bool = False):
+    # A stale request or recovery pass must never recreate a deleted workspace.
+    db = connect(settings.data_path / 'users' / f'user_{user_id}.db', create=create)
     try:
         yield db
         db.commit()
@@ -155,6 +185,7 @@ def workspace_db(user_id: int):
 def init_databases():
     with control_db() as db:
         db.executescript(CONTROL_SCHEMA)
+        migrate_user_identities(db)
         provider_columns = {row['name'] for row in db.execute('PRAGMA table_info(providers)')}
         for name, definition in {
             'input_price_per_million': 'REAL',
@@ -179,6 +210,27 @@ def init_databases():
         backfill_deployment_registry(user_id)
 
 
+def migrate_user_identities(db):
+    """Allow phone-only accounts while retaining all existing IDs and account state."""
+    db.execute('BEGIN IMMEDIATE')
+    columns = {row['name']: row for row in db.execute('PRAGMA table_info(users)')}
+    for name, definition in {'phone': 'TEXT', 'verified_at': 'TEXT', 'reviewed_at': 'TEXT', 'reviewed_by': 'INTEGER',
+                             'session_version': 'INTEGER NOT NULL DEFAULT 0'}.items():
+        if name not in columns:
+            db.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
+    definition = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()[0]
+    if columns['email']['notnull'] or 'AUTOINCREMENT' not in definition.upper():
+        sequence = db.execute("SELECT seq FROM sqlite_sequence WHERE name='users'").fetchone()
+        db.execute(USERS_SCHEMA.replace('IF NOT EXISTS users', 'users_new'))
+        fields = 'id,email,phone,name,password_hash,role,status,created_at,verified_at,reviewed_at,reviewed_by,session_version'
+        db.execute(f'INSERT INTO users_new({fields}) SELECT {fields} FROM users')
+        db.execute('DROP TABLE users')
+        db.execute('ALTER TABLE users_new RENAME TO users')
+        if sequence:
+            db.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='users'", (sequence['seq'],))
+    db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone)')
+
+
 def backfill_deployment_registry(user_id: int) -> None:
     from .deployment_registry import upsert_deployment
     with workspace_db(user_id) as workspace:
@@ -190,7 +242,7 @@ def backfill_deployment_registry(user_id: int) -> None:
 
 
 def workspace_for(user_id: int):
-    with workspace_db(user_id) as db:
+    with workspace_db(user_id, create=True) as db:
         db.executescript(WORKSPACE_SCHEMA)
         columns = {row['name'] for row in db.execute('PRAGMA table_info(projects)')}
         if 'hosting_expires_at' not in columns:
