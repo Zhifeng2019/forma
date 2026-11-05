@@ -30,8 +30,27 @@ Forma is an AI-native application builder built around a guided product-developm
 
 ### Start the studio
 
-Copy `.env.example` to `backend/.env` and configure your local secrets there. The backend reads
-`backend/.env`; exported process variables take precedence. Use Node.js 24 for the frontend tools.
+Use Python 3.11 or newer and Node.js 24. From the repository root, create and activate a
+Python environment, install the backend dependencies, and copy the configuration template:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r backend/requirements.txt
+cp -n .env.example backend/.env
+```
+
+These commands use a macOS/Linux shell. On Windows PowerShell, create the environment with
+`py -m venv .venv` and activate it with `.venv\Scripts\Activate.ps1`.
+You can also activate an existing Python environment instead of creating `.venv`.
+
+For a **new installation**, run `python -c "import secrets; print(secrets.token_urlsafe(48))"`
+locally and add `SECRET_KEY=<generated value>` to `backend/.env` before the first start.
+On an existing installation, changing this key invalidates sessions and makes saved provider
+credentials unreadable. Plan to re-enter those credentials if you rotate the key.
+
+Configure delivery and other local settings in `backend/.env`. The backend reads
+`backend/.env`; exported process variables take precedence.
 This is the only environment file Forma loads, regardless of the working directory or launcher.
 Keep only `backend/.env`; do not create a root `.env`, which the app ignores. `.env.example`
 is a template, not a loaded configuration file. Startup logs identify the active file, any ignored
@@ -45,6 +64,8 @@ npm run dev -- --host 0.0.0.0
 ```
 
 This starts both Vite and FastAPI, and shuts both down together. Open `http://localhost:5173`.
+The development launcher uses `python` from the active environment; set `PYTHON` to select
+a different Python executable. Reactivate the environment when opening a new terminal.
 
 Generated apps use subdomains of `APPS_BASE_URL` (default `http://apps.localhost:8000`).
 Chromium resolves these `.localhost` names to loopback without editing the hosts file.
@@ -68,18 +89,18 @@ have separate browser storage. Existing storage at the old address is not delete
 generated backends keep their existing server-side databases. This follows the browser's
 [origin-based storage boundary](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Same-origin_policy).
 
-To run the API independently for development:
+To run the API independently for development, activate the environment and run from the repository root:
 
 ```bash
 cd backend
-/Users/zhifengzhang/python_env/env_ai_build/bin/python -m uvicorn app.main:app --reload --reload-exclude 'data/**' --port 8000
+python -m uvicorn app.main:app --reload --reload-exclude 'data/**' --port 8000
 ```
 
 The initial local administrator is `admin@forma.local` with password `admin123`. Change this account before exposing the service publicly. All data is development-local by default under `data/`.
 
 ## Deploy to Aliyun ECS
 
-See the [deployment guide for `www.riskcat.cn/forma`](docs/deployment-aliyun-ecs.md). It includes a systemd service, Nginx snippets that coexist with existing applications, wildcard HTTPS for generated apps, and backup/update instructions. Production subpath hosting uses `npm run build -- --base=/forma/` plus `STUDIO_PATH_PREFIX=/forma` in the single `backend/.env` file.
+See the [Aliyun ECS deployment guide](docs/deployment-aliyun-ecs.md). It includes a systemd service, Nginx snippets that coexist with existing applications, wildcard HTTPS for generated apps, and backup/update instructions. Production subpath hosting uses `npm run build -- --base=/forma/` plus `STUDIO_PATH_PREFIX=/forma` in the single `backend/.env` file. Substitute your own domains and server paths when following the guide.
 
 ## Interface languages
 
@@ -104,10 +125,10 @@ Existing accounts retain their IDs, passwords, roles, workspaces, and access whe
 
 Administrators can select **Delete** in **User management** and confirm permanent account removal. This stops the user's active work and hosted apps, then removes all their projects, application databases, source/build files, workspace history, personal model providers, preferences, and verification records. Shared administrator-managed providers and other users' data remain available. Administrators cannot delete their own account. If cleanup fails, the account stays blocked with **Retry delete** available; its contact is released only after cleanup succeeds. The same email or phone can then register again with a new account ID, fresh verification, and administrator approval. Previous sessions cannot access the new account.
 
-Configure delivery in `backend/.env` using the settings in `.env.example`. No credentials are copied from the reference application. Both channels default to disabled; registration remains unavailable until at least one delivery method is configured and enabled:
+Configure delivery in `backend/.env` using the settings in `.env.example`. Both channels default to disabled; registration remains unavailable until at least one delivery method is configured and enabled:
 
 - **Email:** set `AUTH_EMAIL_DELIVERY_ENABLED=true`, `SMTP_HOST`, `SMTP_FROM_ADDRESS`, and the SMTP authentication credentials as needed. Use `SMTP_TLS_MODE=ssl` (typically port 465) or `starttls` (typically port 587). TLS certificate validation is required; plaintext SMTP is unsupported.
-- **SMS:** set `AUTH_SMS_DELIVERY_ENABLED=true`, `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, `ALIYUN_SMS_SIGN_NAME`, and the approved `ALIYUN_SMS_REGISTRATION_TEMPLATE_CODE`. `ALIYUN_SMS_CODE_PARAM` defaults to `code`; set it to the template's verification-code parameter. Temporary credentials may also supply `ALIBABA_CLOUD_SECURITY_TOKEN`. The adapter uses Alibaba Cloud's mainland China `SendSms` endpoint and ACS3 request signing, following the supplied ai_chat authentication implementation.
+- **SMS:** set `AUTH_SMS_DELIVERY_ENABLED=true`, `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, `ALIYUN_SMS_SIGN_NAME`, and the approved `ALIYUN_SMS_REGISTRATION_TEMPLATE_CODE`. `ALIYUN_SMS_CODE_PARAM` defaults to `code`; set it to the template's verification-code parameter. Temporary credentials may also supply `ALIBABA_CLOUD_SECURITY_TOKEN`. The adapter uses Alibaba Cloud's mainland China `SendSms` endpoint and ACS3 request signing.
 
 Codes expire after 10 minutes, allow at most five incorrect guesses, and are invalidated by resending. Requests enforce a 60-second cooldown, five sends per contact per hour, and 20 sends per client IP per hour, including failed deliveries. Resending does not reset incorrect guesses. Counters and challenges persist across restarts. Contact details in pending challenges are encrypted, codes use a keyed hash, and passwords use the existing password hash. Successful verification consumes all competing challenges for that contact. Old challenges and rate records are pruned on subsequent send requests. Delivery failures never grant an account or a session, and SMS requests are not automatically retried when delivery acceptance is uncertain.
 
@@ -262,10 +283,10 @@ The active implementation and historical milestones are recorded in [doc/IMPLEME
 - The deterministic verifier produces durable reports with spec/source hashes, tool-run IDs, durations, blocked/failed details, full-coverage `can_publish` evaluation, and forced retry support. The Verification panel presents this evidence and refreshes deferred runs automatically.
 - Public deployments resolve through the control-plane registry with write-through publish, republish, unpublish, and delete synchronization and backfilled version-specific architecture. Public lookup no longer scans every user database.
 
-Regenerate the evaluation baseline with:
+With the Python environment activated, regenerate the evaluation baseline from the repository root:
 
 ```bash
-cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/capture_baseline.py
+(cd backend && python scripts/capture_baseline.py)
 ```
 
 Use `--skip-browser` for backend/frontend-only capture. Captures now write suite-only schema
@@ -278,7 +299,7 @@ such archived evidence explicitly; it never runs the deleted compiler.
 Compare two current suite-only captures using:
 
 ```bash
-cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/capture_baseline.py --check --reference /path/to/suite-baseline.json --output /path/to/candidate.json
+(cd backend && python scripts/capture_baseline.py --check --reference /path/to/suite-baseline.json --output /path/to/candidate.json)
 ```
 
 The check compares reports of the same scope. Compare new suite-only captures against a suite-only reference; do not use the archived compiler-quality baseline as a reference for current generation.
@@ -286,8 +307,8 @@ The check compares reports of the same scope. Compare new suite-only captures ag
 After changing the report contract, regenerate its checked-in JSON Schema and run the schema-drift test:
 
 ```bash
-cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python scripts/capture_baseline.py --write-schema
-/Users/zhifengzhang/python_env/env_ai_build/bin/python -m pytest -q tests/test_capture_baseline.py
+(cd backend && python scripts/capture_baseline.py --write-schema)
+(cd backend && python -m pytest -q tests/test_capture_baseline.py)
 ```
 
 Compatibility fixtures are declared in `backend/tests/fixtures/manifest.json` with resource checksums. Four package bases cover static/FastAPI and single-file/multi-file architectures; shared React sources are extended with replaceable API adapters and a modular backend. Sixteen declarative variants cover current/historical and published/unpublished states, while nine provider fixtures record expected acceptance, normalization, bounded repair, rejection, or overlay handling. Stable package source hashes and normalized AppSpec hashes detect unintended fixture drift.
@@ -298,11 +319,17 @@ The historical AppSpec schema, LLM repair, package-overlay, and requirements-nor
 
 ## Tests
 
+Run from the repository root with the Python environment activated:
+
 ```bash
-cd backend && /Users/zhifengzhang/python_env/env_ai_build/bin/python -m pytest -q
-cd frontend && npm test && npm run build
-cd frontend && npx playwright test
+(cd backend && python -m pytest -q)
+(cd frontend && npm test && npm run build)
+(cd frontend && npx playwright install chromium)
+(cd frontend && npx playwright test)
 ```
+
+Browser tests also use the active environment's `python`. Set `FORMA_TEST_PYTHON` to select
+a different executable for either Playwright configuration.
 
 After building the frontend, set `FORMA_TEST_PRODUCTION=1` to run the browser suite against
 FastAPI's production hosting, including direct studio links and page refreshes. Use a separate
@@ -325,3 +352,9 @@ temporary `DATA_DIR` and an unused `FORMA_TEST_BACKEND_PORT` to isolate it from 
 - `frontend/src/components/SourcePanel.tsx` — current-version source browser and deployment download.
 - `frontend/src/components/BackendPanel.tsx` — FastAPI health, logs, source, and restart controls.
 - `frontend/src/pages/AdminPage.tsx` — provider and member administration.
+
+## License
+
+The Forma builder is licensed under the [Apache License 2.0](LICENSE).
+
+Forma claims no ownership of user-generated apps and imposes no license on them. Users can keep their own code private or distribute it under a license they choose. Any Forma code or third-party components included in an app retain their respective licenses.

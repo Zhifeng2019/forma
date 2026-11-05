@@ -10,6 +10,7 @@ process.env.FORMA_TEST_BACKEND_URL = backendUrl
 process.env.FORMA_TEST_STUDIO_PREFIX = ''
 const production = process.env.FORMA_TEST_PRODUCTION === '1'
 const frontendUrl = production ? backendUrl : `http://127.0.0.1:${frontendPort}`
+const python = process.env.FORMA_TEST_PYTHON || 'python'
 const testDataDir = process.env.FORMA_TEST_DATA_DIR || mkdtempSync(path.join(tmpdir(), 'forma-browser-test-'))
 process.env.FORMA_TEST_DATA_DIR = testDataDir
 const reuseExistingServer = false
@@ -22,7 +23,7 @@ export default defineConfig({
   use: { baseURL: frontendUrl, viewport: { width: 1440, height: 1000 }, trace: 'retain-on-failure' },
   webServer: [
     {
-      command: `/Users/zhifengzhang/python_env/env_ai_build/bin/python -m uvicorn browser_app:app --app-dir tests --host 127.0.0.1 --port ${backendPort}`,
+      command: `"${python}" -m uvicorn browser_app:app --app-dir tests --host 127.0.0.1 --port ${backendPort}`,
       cwd: '../backend', url: `${backendUrl}/api/health`, reuseExistingServer, timeout: 30_000,
       env: { DATA_DIR: testDataDir, FORMA_TEST_DATA_DIR: testDataDir, STUDIO_BASE_URL: backendUrl, STUDIO_PATH_PREFIX: '', APPS_BASE_URL: `http://apps.localhost:${backendPort}`, CORS_ORIGINS: frontendUrl },
     },

@@ -116,14 +116,14 @@ def test_verification_uses_studio_prefix_without_changing_preview_origin(monkeyp
 
     user_id = 950106
     project_id = verification_project(user_id, [dummy_check()])
-    monkeypatch.setattr(runner.settings, 'studio_base_url', 'https://www.riskcat.cn')
+    monkeypatch.setattr(runner.settings, 'studio_base_url', 'https://www.example.com')
     monkeypatch.setattr(runner.settings, 'studio_path_prefix', '/forma')
     environment = runner._base_environment(user_id, project_id, 1, {})
-    assert environment['FORMA_BASE_URL'] == 'https://www.riskcat.cn/forma'
+    assert environment['FORMA_BASE_URL'] == 'https://www.example.com/forma'
     assert '/forma/' not in environment['APP_PREVIEW_URL']
     token = environment['APP_PREVIEW_URL'].rstrip('/').rsplit('/', 1)[1]
     claims = decode_preview_token(token, project_id, 1)
-    assert claims['parent_origin'] == 'https://www.riskcat.cn'
+    assert claims['parent_origin'] == 'https://www.example.com'
 
 
 def test_browser_checks_refresh_preview_grants_after_builds(monkeypatch):

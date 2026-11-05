@@ -1,4 +1,4 @@
-"""SMTP and mainland China Aliyun SMS, adapted from ai_chat's authentication adapters.
+"""Verification code delivery via SMTP and Aliyun SMS for mainland China.
 
 No plaintext transport, automatic SMS retries, or logging of codes, recipients,
 signed request URLs, provider response bodies, or credential-bearing exceptions.

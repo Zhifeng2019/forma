@@ -19,11 +19,11 @@ from test_planning_handoff import make_project, saved_context, source_response
 
 
 def test_studio_path_prefix_keeps_origins_separate():
-    configured = Settings(studio_base_url='https://www.riskcat.cn', studio_path_prefix='/forma/')
+    configured = Settings(studio_base_url='https://www.example.com', studio_path_prefix='/forma/')
     assert configured.studio_path_prefix == '/forma'
-    assert configured.studio_base_url == 'https://www.riskcat.cn'
+    assert configured.studio_base_url == 'https://www.example.com'
     assert configuration_report(configured)['studio_path_prefix'] == '/forma'
-    for invalid in ('forma', 'https://www.riskcat.cn/forma', '/forma?x=1', '/forma/..', '//forma'):
+    for invalid in ('forma', 'https://www.example.com/forma', '/forma?x=1', '/forma/..', '//forma'):
         with pytest.raises(ValueError, match='STUDIO_PATH_PREFIX'):
             Settings(studio_path_prefix=invalid)
 

@@ -2,13 +2,13 @@
 # This is a new server, not a replacement for existing application servers.
 server {
     listen 80;
-    server_name *.forma-apps.riskcat.cn;
+    server_name *.forma-apps.example.com;
     return 308 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name *.forma-apps.riskcat.cn;
+    server_name *.forma-apps.example.com;
     ssl_certificate /etc/nginx/ssl/forma-apps/fullchain.pem;
     ssl_certificate_key /etc/nginx/ssl/forma-apps/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;

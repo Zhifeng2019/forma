@@ -9,7 +9,7 @@ const backendUrl = `http://127.0.0.1:${backendPort}`
 process.env.FORMA_TEST_BACKEND_URL = backendUrl
 process.env.FORMA_TEST_STUDIO_PREFIX = '/forma'
 const publicUrl = `http://127.0.0.1:${proxyPort}`
-const python = process.env.FORMA_TEST_PYTHON || '/Users/zhifengzhang/python_env/env_ai_build/bin/python'
+const python = process.env.FORMA_TEST_PYTHON || 'python'
 const data = process.env.FORMA_TEST_DATA_DIR || mkdtempSync(path.join(tmpdir(), 'forma-subpath-test-'))
 process.env.FORMA_TEST_DATA_DIR = data
 
